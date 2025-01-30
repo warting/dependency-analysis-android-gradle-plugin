@@ -9,13 +9,10 @@ import com.autonomousapps.internal.OutputPaths
 import com.autonomousapps.internal.android.AndroidGradlePluginFactory
 import com.autonomousapps.internal.artifactsFor
 import com.autonomousapps.internal.utils.capitalizeSafely
-import com.autonomousapps.internal.utils.namedOrNull
 import com.autonomousapps.model.declaration.SourceSetKind
 import com.autonomousapps.services.InMemoryCache
 import com.autonomousapps.tasks.*
 import org.gradle.api.Project
-import org.gradle.api.Task
-import org.gradle.api.file.RegularFile
 import org.gradle.api.provider.Provider
 import org.gradle.api.tasks.TaskProvider
 import org.gradle.kotlin.dsl.get
@@ -56,16 +53,12 @@ internal abstract class AndroidAnalyzer(
 
   final override val outputPaths = OutputPaths(project, "$variantName${kind.taskNameSuffix}")
 
-  final override val testJavaCompileName: String = "compile${variantNameCapitalized}UnitTestJavaWithJavac"
-  final override val testKotlinCompileName: String = "compile${variantNameCapitalized}UnitTestKotlin"
-
   final override fun registerByteCodeSourceExploderTask(): TaskProvider<ClassListExploderTask> {
     return project.tasks.register<ClassListExploderTask>("explodeByteCodeSource$taskNameSuffix") {
       classes.setFrom(project.files())
-      kotlinCompileTask()?.let { kotlinClasses.from(it.get().outputs.files.asFileTree) }
-      javaClasses.from(javaCompileTask().get().outputs.files.asFileTree)
-
       output.set(outputPaths.explodingBytecodePath)
+    }.also { provider ->
+      androidSources.wireWithClassFiles(provider)
     }
   }
 
@@ -147,27 +140,6 @@ internal abstract class AndroidAnalyzer(
     }
   }
 
-  // Known to exist in Kotlin 1.3.61.
-  private fun kotlinCompileTask(): TaskProvider<Task>? {
-    return when (androidSources.variant.kind) {
-      SourceSetKind.MAIN -> project.tasks.namedOrNull("compile${variantNameCapitalized}Kotlin")
-      SourceSetKind.TEST -> project.tasks.namedOrNull("compile${variantNameCapitalized}UnitTestKotlin")
-      SourceSetKind.ANDROID_TEST -> project.tasks.namedOrNull("compile${variantNameCapitalized}AndroidTestKotlin")
-      SourceSetKind.CUSTOM_JVM -> error("Custom JVM source sets are not supported in Android context")
-    }
-  }
-
-  // Known to exist in AGP 3.5, 3.6, and 4.0, albeit with different backing classes (AndroidJavaCompile,
-  // JavaCompile)
-  private fun javaCompileTask(): TaskProvider<Task> {
-    return when (androidSources.variant.kind) {
-      SourceSetKind.MAIN -> project.tasks.named("compile${variantNameCapitalized}JavaWithJavac")
-      SourceSetKind.TEST -> project.tasks.named("compile${variantNameCapitalized}UnitTestJavaWithJavac")
-      SourceSetKind.ANDROID_TEST -> project.tasks.named("compile${variantNameCapitalized}AndroidTestJavaWithJavac")
-      SourceSetKind.CUSTOM_JVM -> error("Custom JVM source sets are not supported in Android context")
-    }
-  }
-
   private fun computeTaskNameSuffix(): String {
     return if (androidSources.variant.kind == SourceSetKind.MAIN) {
       // "flavorDebug" -> "FlavorDebug"
@@ -196,6 +168,8 @@ internal class AndroidLibAnalyzer(
   variant: AndroidVariant,
   agpVersion: String,
   androidSources: AndroidSources,
+  /** Tests and Android Tests don't have ABIs. */
+  private val hasAbi: Boolean,
 ) : AndroidAnalyzer(
   project = project,
   variant = variant,
@@ -203,12 +177,15 @@ internal class AndroidLibAnalyzer(
   agpVersion = agpVersion
 ) {
 
-  override fun registerAbiAnalysisTask(abiExclusions: Provider<String>): TaskProvider<AbiAnalysisTask> {
+  override fun registerAbiAnalysisTask(abiExclusions: Provider<String>): TaskProvider<AbiAnalysisTask>? {
+    if (!hasAbi) return null
+
     return project.tasks.register<AbiAnalysisTask>("abiAnalysis$taskNameSuffix") {
-      jar.set(getBundleTaskOutput())
       exclusions.set(abiExclusions)
       output.set(outputPaths.abiAnalysisPath)
       abiDump.set(outputPaths.abiDumpPath)
+    }.also { provider ->
+      androidSources.wireWithClassFiles(provider)
     }
   }
 
@@ -224,7 +201,4 @@ internal class AndroidLibAnalyzer(
       output.set(outputPaths.androidScorePath)
     }
   }
-
-  // TODO stop using bundleTask directly. Fragile.
-  private fun getBundleTaskOutput(): Provider<RegularFile> = agp.getBundleTaskOutput(variantNameCapitalized)
 }

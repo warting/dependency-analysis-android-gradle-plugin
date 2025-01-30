@@ -12,6 +12,7 @@ import org.gradle.api.publish.PublishingExtension
 import org.gradle.api.publish.maven.MavenPublication
 import org.gradle.api.tasks.TaskProvider
 import org.gradle.api.tasks.testing.Test
+import org.gradle.util.GradleVersion
 import java.io.File
 
 /**
@@ -48,6 +49,7 @@ public abstract class GradleTestKitSupportExtension(private val project: Project
   // in other words, this task is an alias for the task dependency below
   internal val installForFunctionalTest: TaskProvider<Task> = project.tasks.register(taskName) { t ->
     t.group = "publishing"
+    t.description = "Publishes all publications to the $repoName repository."
     // install this project's publications
     t.dependsOn("publishAllPublicationsTo${repoName}Repository")
   }
@@ -140,7 +142,6 @@ public abstract class GradleTestKitSupportExtension(private val project: Project
    */
   public fun disablePublication() {
     disablePub.set(true)
-    disablePub.disallowChanges()
   }
 
   internal fun setTestTask(testTask: TaskProvider<Test>) {
@@ -208,8 +209,17 @@ public abstract class GradleTestKitSupportExtension(private val project: Project
     return configurations.findByName(classpath)?.allDependencies
       ?.filterIsInstance<ProjectDependency>()
       // filter out self-dependency
-      ?.filterNot { it.dependencyProject == project }
-      ?.map { "${it.dependencyProject.path}:$taskName" }
+      ?.filterNot { projectPath(it) == project.path }
+      ?.map { "${projectPath(it)}:$taskName" }
+  }
+
+  private val isAtLeastGradle811 = GradleVersion.current() >= GradleVersion.version("8.11")
+
+  private fun projectPath(projectDependency: ProjectDependency): String = if (isAtLeastGradle811) {
+    projectDependency.path
+  } else {
+    @Suppress("DEPRECATION")
+    projectDependency.dependencyProject.path
   }
 
   /**
@@ -248,8 +258,8 @@ public abstract class GradleTestKitSupportExtension(private val project: Project
 
   internal companion object {
 
-    private const val DEFAULT_SUPPORT_VERSION = "0.14"
-    private const val DEFAULT_TRUTH_VERSION = "1.5"
+    private const val DEFAULT_SUPPORT_VERSION = "0.17"
+    private const val DEFAULT_TRUTH_VERSION = "1.6.1"
 
     fun create(project: Project): GradleTestKitSupportExtension {
       return project.extensions.create(

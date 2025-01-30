@@ -4,11 +4,10 @@
 
 package com.autonomousapps.tasks
 
-import com.autonomousapps.TASK_GROUP_DEP_INTERNAL
 import com.autonomousapps.internal.utils.bufferWriteJsonSet
 import com.autonomousapps.internal.utils.filterNonGradle
 import com.autonomousapps.internal.utils.getAndDelete
-import com.autonomousapps.model.PhysicalArtifact
+import com.autonomousapps.model.internal.PhysicalArtifact
 import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
 import org.gradle.api.artifacts.ArtifactCollection
@@ -27,7 +26,6 @@ import org.gradle.api.tasks.*
 abstract class ArtifactsReportTask : DefaultTask() {
 
   init {
-    group = TASK_GROUP_DEP_INTERNAL
     description = "Produces a report that lists all direct and transitive dependencies, along with their artifacts"
   }
 

@@ -29,12 +29,16 @@ final class DataBindingWithExpressionsProject extends AbstractAndroidProject {
     return newAndroidGradleProjectBuilder(agpVersion)
       .withAndroidSubproject('app') { app ->
         app.withBuildScript { bs ->
-          bs.plugins = [Plugins.androidApp, Plugins.kotlinAndroid, Plugins.kapt]
+          bs.plugins = [
+            Plugins.androidApp,
+            Plugins.kotlinAndroidNoVersion,
+            Plugins.dependencyAnalysisNoVersion,
+          ]
           bs.android = defaultAndroidAppBlock(true, 'com.example.app')
           bs.dependencies = [
             appcompat("implementation")
           ]
-          bs.withGroovy("android.buildFeatures.dataBinding true")
+          bs.withGroovy('android.buildFeatures.dataBinding true')
         }
         app.manifest = appManifest('com.example.app')
         app.sources = sources
@@ -74,5 +78,7 @@ final class DataBindingWithExpressionsProject extends AbstractAndroidProject {
     return actualProjectAdvice(gradleProject)
   }
 
-  final Set<ProjectAdvice> expectedBuildHealth = [emptyProjectAdviceFor(':app')]
+  final Set<ProjectAdvice> expectedBuildHealth = [
+    emptyProjectAdviceFor(':app'),
+  ]
 }

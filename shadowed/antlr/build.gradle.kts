@@ -5,14 +5,13 @@
 plugins {
   `java-library`
   antlr
-  id("com.github.johnrengelman.shadow")
+  id("com.gradleup.shadow")
   groovy
   id("convention")
   // This project doesn't need Kotlin, but it is now applied thanks to `convention`. problem?
 }
 
-val antlrVersion = "4.10.1"
-version = "$antlrVersion.5"
+version = "${libs.versions.antlr.base.get()}.0"
 
 val isSnapshot = version.toString().endsWith("SNAPSHOT", true)
 
@@ -50,8 +49,8 @@ configurations.runtimeClasspath {
 }
 
 dependencies {
-  antlr("org.antlr:antlr4:$antlrVersion")
-  runtimeOnly("org.antlr:antlr4-runtime:$antlrVersion")
+  antlr(libs.antlr.core)
+  runtimeOnly(libs.antlr.runtime)
   implementation(libs.grammar)
 
   testImplementation(libs.spock)
@@ -70,6 +69,9 @@ tasks.shadowJar {
 
   relocate("org.antlr", "com.autonomousapps.internal.antlr")
   relocate("org.glassfish.json", "com.autonomousapps.internal.glassfish.json")
+  relocate("javax.json", "com.autonomousapps.internal.javax.json")
+  relocate("org.abego.treelayout", "com.autonomousapps.internal.abego.treelayout")
+  relocate("org.stringtemplate.v4", "com.autonomousapps.internal.stringtemplate.v4")
 
   dependencies {
     // Don't bundle Kotlin or other Jetbrains dependencies
@@ -88,10 +90,19 @@ tasks.named<Jar>("sourcesJar") {
   duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
-val javaComponent = components["java"] as AdhocComponentWithVariants
-listOf("apiElements", "runtimeElements").forEach { unpublishable ->
-  // Hide the un-shadowed variants in local consumption
-  configurations[unpublishable].isCanBeConsumed = false
-  // Hide the un-shadowed variants in publishing
-  javaComponent.withVariantsFromConfiguration(configurations[unpublishable]) { skip() }
+tasks.assemble {
+  dependsOn(tasks.shadowJar)
 }
+
+val javaComponent = components["java"] as AdhocComponentWithVariants
+listOf("apiElements", "runtimeElements")
+  .map { configurations[it] }
+  .forEach { unpublishable ->
+    // Hide the un-shadowed variants in local consumption, by mangling their attributes
+    unpublishable.attributes {
+      attribute(Bundling.BUNDLING_ATTRIBUTE, objects.named("DO_NOT_USE"))
+    }
+
+    // Hide the un-shadowed variants in publishing
+    javaComponent.withVariantsFromConfiguration(unpublishable) { skip() }
+  }

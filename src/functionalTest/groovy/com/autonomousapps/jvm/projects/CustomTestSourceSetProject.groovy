@@ -7,7 +7,6 @@ import com.autonomousapps.kit.GradleProject
 import com.autonomousapps.kit.Source
 import com.autonomousapps.kit.SourceType
 import com.autonomousapps.kit.gradle.Plugin
-import com.autonomousapps.kit.gradle.dependencies.Plugins
 import com.autonomousapps.model.Advice
 import com.autonomousapps.model.ProjectAdvice
 
@@ -31,13 +30,13 @@ final class CustomTestSourceSetProject extends AbstractProject {
   }
 
   private GradleProject build() {
-    def builder = newGradleProjectBuilder()
-    builder.withSubproject('proj') { s ->
-      s.sources = source()
-      s.withBuildScript { bs ->
-        bs.plugins = plugins()
-        bs.dependencies = [commonsCollections, junit]
-        bs.withGroovy('''\
+    return newGradleProjectBuilder()
+      .withSubproject('proj') { s ->
+        s.sources = source()
+        s.withBuildScript { bs ->
+          bs.plugins = plugins()
+          bs.dependencies = [commonsCollections, junit]
+          bs.withGroovy('''\
           sourceSets {
             functionalTest {
               compileClasspath += main.output + configurations.testRuntimeClasspath
@@ -47,19 +46,16 @@ final class CustomTestSourceSetProject extends AbstractProject {
           configurations {
             functionalTestImplementation.extendsFrom testImplementation
           }''')
+        }
       }
-    }
-
-    def project = builder.build()
-    project.writer().write()
-    return project
+      .write()
   }
 
   private List<Plugin> plugins() {
     if (sourceType == SourceType.JAVA) {
-      return [Plugin.javaLibrary]
+      return javaLibrary
     } else if (sourceType == SourceType.KOTLIN) {
-      return [Plugins.kotlinNoVersion]
+      return kotlin
     } else {
       throw new IllegalArgumentException("Only Java and Kotlin supported. Was '${sourceType}'.")
     }
@@ -111,6 +107,13 @@ final class CustomTestSourceSetProject extends AbstractProject {
   ]
 
   private List<Source> kotlinSource = [
+    // We want one Kotlin class in the main source as a workaround for a deficiency in the algorithm. KGP adds the
+    // stdlib to the `api` configuration. If Kotlin is only used in a non-main source, then the algo will suggest moving
+    // stdlib from api -> testImplementation (e.g.). This advice cannot be followed. We still don't have a good solution
+    // for default dependencies added by plugins.
+    Source.kotlin('''class Main''')
+      .withPath('', 'Main')
+      .build(),
     new Source(
       SourceType.KOTLIN, 'FunctionalTest', 'com/example/func',
       """\

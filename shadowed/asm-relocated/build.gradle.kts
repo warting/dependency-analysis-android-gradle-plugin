@@ -2,15 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 plugins {
   `java-library`
-  id("com.github.johnrengelman.shadow")
+  id("com.gradleup.shadow")
   id("convention")
   // This project doesn't need Kotlin, but it is now applied thanks to `convention`. problem?
 }
 
-version = "9.6.0.0"
+version = "9.7.1.0"
 
 val isSnapshot = version.toString().endsWith("SNAPSHOT", true)
-val VERSION_ASM = "9.6"
+val VERSION_ASM = "9.7.1"
 
 dependencies {
   implementation("org.ow2.asm:asm:$VERSION_ASM")
@@ -44,13 +44,30 @@ tasks.jar {
 
 tasks.shadowJar {
   archiveClassifier.set("")
+
   relocate("org.objectweb.asm", "com.autonomousapps.internal.asm")
+
+  dependencies {
+    // Don't bundle Kotlin or other Jetbrains dependencies
+    exclude {
+      it.moduleGroup.startsWith("org.jetbrains")
+    }
+  }
+}
+
+tasks.assemble {
+  dependsOn(tasks.shadowJar)
 }
 
 val javaComponent = components["java"] as AdhocComponentWithVariants
-listOf("apiElements", "runtimeElements").forEach { unpublishable ->
-  // Hide the un-shadowed variants in local consumption
-  configurations[unpublishable].isCanBeConsumed = false
-  // Hide the un-shadowed variants in publishing
-  javaComponent.withVariantsFromConfiguration(configurations[unpublishable]) { skip() }
-}
+listOf("apiElements", "runtimeElements")
+  .map { configurations[it] }
+  .forEach { unpublishable ->
+    // Hide the un-shadowed variants in local consumption, by mangling their attributes
+    unpublishable.attributes {
+      attribute(Bundling.BUNDLING_ATTRIBUTE, objects.named("DO_NOT_USE"))
+    }
+
+    // Hide the un-shadowed variants in publishing
+    javaComponent.withVariantsFromConfiguration(unpublishable) { skip() }
+  }

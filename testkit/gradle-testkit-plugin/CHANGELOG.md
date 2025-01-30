@@ -1,5 +1,15 @@
 Gradle TestKit Plugin Changelog
 
+# Version 0.11
+* [fix] Update default support lib version to 0.17.
+
+# Version 0.10
+* [fix] don't disallow changes on the `disablePublication()` property.
+* [fix] Update default support and truth lib versions.
+
+# Version 0.9
+* [chore] Update default support and truth lib versions.
+
 # Version 0.8
 * [chore] Update default support and truth lib versions.
 

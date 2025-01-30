@@ -55,13 +55,20 @@ public object GradleBuilder {
     projectDir: Path,
     vararg args: String,
   ): BuildResult = buildAndFail(gradleVersion, projectDir.toFile(), *args)
-
+  
   @JvmStatic
   public fun buildAndFail(
     gradleVersion: GradleVersion,
     projectDir: File,
     vararg args: String,
   ): BuildResult = runner(gradleVersion, projectDir, *args).buildAndFail()
+
+  @JvmStatic
+  public fun runner(
+    gradleVersion: GradleVersion,
+    projectDir: Path,
+    vararg args: String,
+  ): GradleRunner = runner(gradleVersion, projectDir.toFile(), *args)
 
   @JvmStatic
   public fun runner(
@@ -73,9 +80,9 @@ public object GradleBuilder {
     withGradleVersion(gradleVersion.version)
     withProjectDir(projectDir)
     withArguments(args.toList() + "-s")
+
     // Ensure this value is true when `--debug-jvm` is passed to Gradle, and false otherwise
-    withDebug(
-      ManagementFactory.getRuntimeMXBean().inputArguments.toString().indexOf("-agentlib:jdwp") > 0
-    )
+    val isDebugJvm = ManagementFactory.getRuntimeMXBean().inputArguments.toString().indexOf("-agentlib:jdwp") > 0
+    withDebug(isDebugJvm)
   }
 }

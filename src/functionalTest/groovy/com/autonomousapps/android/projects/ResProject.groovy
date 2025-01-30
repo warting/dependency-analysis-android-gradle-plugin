@@ -8,7 +8,6 @@ import com.autonomousapps.kit.SourceType
 import com.autonomousapps.kit.android.AndroidColorRes
 import com.autonomousapps.kit.android.AndroidManifest
 import com.autonomousapps.kit.android.AndroidStyleRes
-import com.autonomousapps.kit.gradle.dependencies.Plugins
 import com.autonomousapps.model.ProjectAdvice
 
 import static com.autonomousapps.AdviceHelper.actualProjectAdvice
@@ -37,7 +36,7 @@ final class ResProject extends AbstractAndroidProject {
     return newAndroidGradleProjectBuilder(agpVersion)
       .withAndroidSubproject('app') { app ->
         app.withBuildScript { bs ->
-          bs.plugins = [Plugins.androidApp, Plugins.kotlinAndroid]
+          bs.plugins = androidAppWithKotlin
           bs.android = defaultAndroidAppBlock()
           bs.dependencies = [
             project('implementation', ':lib'),
@@ -63,7 +62,7 @@ final class ResProject extends AbstractAndroidProject {
       }
       .withAndroidLibProject('lib', 'com.example.lib') { lib ->
         lib.withBuildScript { bs ->
-          bs.plugins = [Plugins.androidLib]
+          bs.plugins = androidLibPlugin
           bs.android = defaultAndroidLibBlock(false, 'com.example.lib')
         }
         lib.colors = AndroidColorRes.DEFAULT
@@ -71,7 +70,7 @@ final class ResProject extends AbstractAndroidProject {
       }
       .withAndroidLibProject('lib2', 'com.example.lib2') { lib2 ->
         lib2.withBuildScript { bs ->
-          bs.plugins = [Plugins.androidLib]
+          bs.plugins = androidLibPlugin
           bs.android = defaultAndroidLibBlock(false, 'com.example.lib2')
         }
         lib2.manifest = AndroidManifest.defaultLib('com.example.lib2')
@@ -103,9 +102,9 @@ final class ResProject extends AbstractAndroidProject {
     return actualProjectAdvice(gradleProject)
   }
 
-  final Set<ProjectAdvice> expectedBuildHealth = emptyProjectAdviceFor(
-    ':app',
-    ':lib',
-    ':lib2',
-  )
+  final Set<ProjectAdvice> expectedBuildHealth = [
+    emptyProjectAdviceFor(':app'),
+    emptyProjectAdviceFor(':lib'),
+    emptyProjectAdviceFor(':lib2'),
+  ]
 }

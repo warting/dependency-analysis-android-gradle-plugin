@@ -3,15 +3,15 @@
 package com.autonomousapps.tasks
 
 import com.autonomousapps.Flags.shouldAnalyzeTests
-import com.autonomousapps.TASK_GROUP_DEP_INTERNAL
 import com.autonomousapps.internal.NoVariantOutputPaths
+import com.autonomousapps.internal.utils.ModuleInfo
 import com.autonomousapps.internal.utils.bufferWriteJsonSet
 import com.autonomousapps.internal.utils.getAndDelete
 import com.autonomousapps.internal.utils.toIdentifiers
 import com.autonomousapps.model.GradleVariantIdentification
-import com.autonomousapps.model.declaration.Configurations.isForAnnotationProcessor
-import com.autonomousapps.model.declaration.Configurations.isForRegularDependency
-import com.autonomousapps.model.declaration.Declaration
+import com.autonomousapps.model.declaration.internal.Configurations.isForAnnotationProcessor
+import com.autonomousapps.model.declaration.internal.Configurations.isForRegularDependency
+import com.autonomousapps.model.declaration.internal.Declaration
 import org.gradle.api.DefaultTask
 import org.gradle.api.Project
 import org.gradle.api.artifacts.Configuration
@@ -25,7 +25,6 @@ import org.gradle.api.tasks.*
 abstract class FindDeclarationsTask : DefaultTask() {
 
   init {
-    group = TASK_GROUP_DEP_INTERNAL
     description = "Produces a report of all dependencies and the configurations on which they are declared"
   }
 
@@ -57,11 +56,11 @@ abstract class FindDeclarationsTask : DefaultTask() {
 
       task.projectPath.set(project.path)
       task.shouldAnalyzeTest.set(shouldAnalyzeTests)
-      task.declarationContainer.set(computeLocations(project, shouldAnalyzeTests))
+      task.declarationContainer.set(computeDeclarations(project, shouldAnalyzeTests))
       task.output.set(outputPaths.locationsPath)
     }
 
-    private fun computeLocations(project: Project, shouldAnalyzeTests: Boolean): Provider<DeclarationContainer> {
+    private fun computeDeclarations(project: Project, shouldAnalyzeTests: Boolean): Provider<DeclarationContainer> {
       val configurations = project.configurations
       return project.provider {
         DeclarationContainer.of(
@@ -87,12 +86,18 @@ abstract class FindDeclarationsTask : DefaultTask() {
     }
   }
 
-  class DeclarationContainer(@get:Input val mapping: Map<String, Set<Pair<String, GradleVariantIdentification>>>) {
+  class DeclarationContainer(
+    @get:Input
+    val mapping: Map<String, Set<Pair<ModuleInfo, GradleVariantIdentification>>>
+  ) {
 
     companion object {
       internal fun of(
-        mapping: Map<String, Set<Pair<String, GradleVariantIdentification>>>
-      ): DeclarationContainer = DeclarationContainer(mapping)
+        mapping: Map<String, Set<Pair<ModuleInfo, GradleVariantIdentification>>>
+      ): DeclarationContainer {
+        // We sort the map so that the task input property is consistent in different environments
+        return DeclarationContainer(mapping.toSortedMap())
+      }
     }
   }
 
@@ -102,12 +107,15 @@ abstract class FindDeclarationsTask : DefaultTask() {
         .flatMap { (conf, identifiers) ->
           identifiers.map { id ->
             Declaration(
-              identifier = id.first,
+              identifier = id.first.identifier,
+              version = id.first.version,
               configurationName = conf,
               gradleVariantIdentification = id.second
             )
           }
         }
+        .sortedWith(compareBy<Declaration> { it.configurationName }
+          .thenComparing { it -> it.identifier })
         .toSet()
     }
   }

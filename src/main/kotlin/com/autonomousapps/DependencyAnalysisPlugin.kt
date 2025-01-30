@@ -8,15 +8,14 @@ import com.autonomousapps.Flags.compatibility
 import com.autonomousapps.internal.GradleVersions
 import com.autonomousapps.internal.android.AgpVersion
 import com.autonomousapps.internal.utils.getLogger
+import com.autonomousapps.services.GlobalDslService
 import com.autonomousapps.subplugin.ProjectPlugin
 import com.autonomousapps.subplugin.RootPlugin
-import org.gradle.api.GradleException
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.logging.Logger
 
 internal const val TASK_GROUP_DEP = "dependency-analysis"
-internal const val TASK_GROUP_DEP_INTERNAL = "dependency-analysis-internal"
 
 /** For use in contexts where a logger isn't easily available */
 internal val PROJECT_LOGGER: Logger = getLogger<DependencyAnalysisPlugin>()
@@ -24,9 +23,12 @@ internal val PROJECT_LOGGER: Logger = getLogger<DependencyAnalysisPlugin>()
 @Suppress("unused")
 class DependencyAnalysisPlugin : Plugin<Project> {
 
+  internal companion object {
+    const val ID = "com.autonomousapps.dependency-analysis"
+  }
+
   override fun apply(project: Project): Unit = project.run {
     applyForRoot()
-    checkPluginWasAppliedToRoot()
     applyForProject()
   }
 
@@ -68,15 +70,6 @@ class DependencyAnalysisPlugin : Plugin<Project> {
         Flags.Compatibility.ERROR -> logger.error(message)
         Flags.Compatibility.NONE -> error("Not possible")
       }
-    }
-  }
-
-  /** Plugin _must_ be applied to the root for it to work. */
-  private fun Project.checkPluginWasAppliedToRoot() {
-    // "test" is the name of the dummy project that Kotlin DSL applies a plugin to when generating
-    // script accessors
-    if (getExtensionOrNull() == null && rootProject.name != "test") {
-      throw GradleException("You must apply the plugin to the root project. Current project is $path")
     }
   }
 

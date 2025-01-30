@@ -4,13 +4,12 @@
 
 package com.autonomousapps.tasks
 
-import com.autonomousapps.TASK_GROUP_DEP_INTERNAL
 import com.autonomousapps.internal.ManifestParser
 import com.autonomousapps.internal.utils.bufferWriteJsonSet
 import com.autonomousapps.internal.utils.getAndDelete
 import com.autonomousapps.internal.utils.mapNotNullToOrderedSet
-import com.autonomousapps.model.AndroidManifestCapability.Component
-import com.autonomousapps.model.intermediates.AndroidManifestDependency
+import com.autonomousapps.model.internal.AndroidManifestCapability.Component
+import com.autonomousapps.model.internal.intermediates.AndroidManifestDependency
 import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
 import org.gradle.api.artifacts.ArtifactCollection
@@ -23,7 +22,6 @@ import org.gradle.api.tasks.*
 abstract class ManifestComponentsExtractionTask : DefaultTask() {
 
   init {
-    group = TASK_GROUP_DEP_INTERNAL
     description = "Produces a report of packages, from other components, that are included via Android manifests"
   }
 

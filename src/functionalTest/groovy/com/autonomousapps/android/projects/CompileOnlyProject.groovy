@@ -28,8 +28,8 @@ final class CompileOnlyProject extends AbstractAndroidProject {
       .withAndroidLibProject('lib', 'com.example.lib') { lib ->
         lib.manifest = libraryManifest()
         lib.withBuildScript { bs ->
-          bs.plugins = [Plugins.androidLib, Plugins.kotlinAndroid]
-          bs.android = defaultAndroidLibBlock(true)
+          bs.plugins = androidLibPlugin
+          bs.android = defaultAndroidLibBlock(false)
           bs.dependencies = [
             commonsText('compileOnly'),
           ]

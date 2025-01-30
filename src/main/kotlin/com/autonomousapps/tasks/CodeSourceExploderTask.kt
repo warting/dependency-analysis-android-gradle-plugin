@@ -2,12 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 package com.autonomousapps.tasks
 
-import com.autonomousapps.TASK_GROUP_DEP_INTERNAL
 import com.autonomousapps.internal.parse.SourceListener
 import com.autonomousapps.internal.utils.bufferWriteJsonSet
 import com.autonomousapps.internal.utils.getAndDelete
-import com.autonomousapps.model.CodeSource.Kind
-import com.autonomousapps.model.intermediates.ExplodingSourceCode
+import com.autonomousapps.model.internal.CodeSource.Kind
+import com.autonomousapps.model.internal.intermediates.consumer.ExplodingSourceCode
 import org.gradle.api.DefaultTask
 import org.gradle.api.file.ConfigurableFileCollection
 import org.gradle.api.file.DirectoryProperty
@@ -28,7 +27,6 @@ abstract class CodeSourceExploderTask @Inject constructor(
 ) : DefaultTask() {
 
   init {
-    group = TASK_GROUP_DEP_INTERNAL
     description = "Parses Java and Kotlin source to detect source-only usages"
   }
 

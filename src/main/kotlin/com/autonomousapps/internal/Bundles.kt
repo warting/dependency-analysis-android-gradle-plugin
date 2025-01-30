@@ -7,8 +7,9 @@ import com.autonomousapps.graph.Graphs.children
 import com.autonomousapps.graph.Graphs.reachableNodes
 import com.autonomousapps.model.*
 import com.autonomousapps.model.Coordinates.Companion.copy
-import com.autonomousapps.model.declaration.Bucket
-import com.autonomousapps.model.intermediates.Usage
+import com.autonomousapps.model.declaration.internal.Bucket
+import com.autonomousapps.model.internal.DependencyGraphView
+import com.autonomousapps.model.internal.intermediates.Usage
 
 /**
  * :proj
@@ -47,6 +48,7 @@ internal class Bundles private constructor(private val dependencyUsages: Map<Coo
 
   fun hasUsedChild(coordinates: Coordinates): Boolean {
     val children = parentKeyedBundle[coordinates] ?: return false
+
     return children.any { child ->
       dependencyUsages[child].orEmpty().any { it.bucket != Bucket.NONE }
     }
@@ -54,6 +56,7 @@ internal class Bundles private constructor(private val dependencyUsages: Map<Coo
 
   fun findUsedChild(coordinates: Coordinates): Coordinates? {
     val children = parentKeyedBundle[coordinates] ?: return null
+
     return children.find { child ->
       dependencyUsages[child].orEmpty().any { it.bucket != Bucket.NONE }
     }

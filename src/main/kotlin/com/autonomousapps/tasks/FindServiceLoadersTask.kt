@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 package com.autonomousapps.tasks
 
-import com.autonomousapps.TASK_GROUP_DEP_INTERNAL
 import com.autonomousapps.internal.ANNOTATION_PROCESSOR_PATH
 import com.autonomousapps.internal.SERVICE_LOADER_PATH
 import com.autonomousapps.internal.utils.*
@@ -10,7 +9,7 @@ import com.autonomousapps.internal.utils.filterNonGradle
 import com.autonomousapps.internal.utils.filterToSet
 import com.autonomousapps.internal.utils.flatMapToSet
 import com.autonomousapps.internal.utils.getAndDelete
-import com.autonomousapps.model.intermediates.ServiceLoaderDependency
+import com.autonomousapps.model.internal.intermediates.ServiceLoaderDependency
 import org.gradle.api.DefaultTask
 import org.gradle.api.artifacts.ArtifactCollection
 import org.gradle.api.artifacts.result.ResolvedArtifactResult
@@ -33,7 +32,6 @@ import java.util.zip.ZipFile
 abstract class FindServiceLoadersTask : DefaultTask() {
 
   init {
-    group = TASK_GROUP_DEP_INTERNAL
     description = "Produces a report of all dependencies that include Java ServiceLoaders"
   }
 

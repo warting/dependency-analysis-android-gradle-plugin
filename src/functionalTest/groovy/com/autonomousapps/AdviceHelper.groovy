@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 package com.autonomousapps
 
-import com.autonomousapps.advice.PluginAdvice
 import com.autonomousapps.kit.GradleProject
 import com.autonomousapps.model.*
+
+import static com.autonomousapps.kit.gradle.dependencies.Dependencies.kotlinStdLib
 
 /**
  * Helps specs find advice output in test projects.
@@ -51,8 +52,9 @@ final class AdviceHelper {
     return new ProjectCoordinates(projectPath, defaultGVI(capability), buildPath)
   }
 
-  static Coordinates includedBuildCoordinates(String identifier, ProjectCoordinates resolvedProject,
-    String capability = null) {
+  static Coordinates includedBuildCoordinates(
+    String identifier, ProjectCoordinates resolvedProject, String capability = null
+  ) {
     return new IncludedBuildCoordinates(identifier, resolvedProject, defaultGVI(capability))
   }
 
@@ -61,7 +63,7 @@ final class AdviceHelper {
   }
 
   static ProjectAdvice emptyProjectAdviceFor(String projectPath) {
-    return new ProjectAdvice(projectPath, [] as Set<Advice>, [] as Set<PluginAdvice>, [] as Set<ModuleAdvice>, false)
+    return new ProjectAdvice(projectPath, [] as Set<Advice>, [] as Set<PluginAdvice>, [] as Set<ModuleAdvice>, Warning.empty(), false)
   }
 
   static ProjectAdvice projectAdviceForDependencies(String projectPath, Set<Advice> advice) {
@@ -69,15 +71,16 @@ final class AdviceHelper {
   }
 
   static ProjectAdvice projectAdviceForDependencies(String projectPath, Set<Advice> advice, boolean shouldFail) {
-    return new ProjectAdvice(projectPath, advice, [] as Set<PluginAdvice>, [] as Set<ModuleAdvice>, shouldFail)
+    return new ProjectAdvice(projectPath, advice, [] as Set<PluginAdvice>, [] as Set<ModuleAdvice>, Warning.empty(), shouldFail)
   }
 
   static ProjectAdvice projectAdvice(String projectPath, Set<Advice> advice, Set<PluginAdvice> pluginAdvice) {
     return projectAdvice(projectPath, advice, pluginAdvice, false)
   }
 
-  static ProjectAdvice projectAdvice(String projectPath, Set<Advice> advice, Set<PluginAdvice> pluginAdvice,
-    boolean shouldFail) {
+  static ProjectAdvice projectAdvice(
+    String projectPath, Set<Advice> advice, Set<PluginAdvice> pluginAdvice, boolean shouldFail
+  ) {
     return projectAdvice(projectPath, advice, pluginAdvice, [] as Set<ModuleAdvice>, shouldFail)
   }
 
@@ -88,7 +91,36 @@ final class AdviceHelper {
     Set<ModuleAdvice> moduleAdvice,
     boolean shouldFail
   ) {
-    return new ProjectAdvice(projectPath, advice, pluginAdvice, moduleAdvice, shouldFail)
+    return new ProjectAdvice(projectPath, advice, pluginAdvice, moduleAdvice, Warning.empty(), shouldFail)
+  }
+
+  /**
+   * This is a workaround for a deficiency in the algorithm. KGP adds the stdlib to the `api` configuration. If Kotlin
+   * is only used as an implementation detail, then the algo will suggest moving stdlib from api -> implementation.
+   * This advice cannot be followed. We still don't have a good solution for default dependencies added by plugins.
+   */
+  static Set<Advice> downgradeKotlinStdlib() {
+    return downgradeKotlinStdlib('main')
+  }
+
+  /**
+   * This is a workaround for a deficiency in the algorithm. KGP adds the stdlib to the `api` configuration. If Kotlin
+   * is only used as an implementation detail, then the algo will suggest moving stdlib from api -> implementation.
+   * This advice cannot be followed. We still don't have a good solution for default dependencies added by plugins.
+   */
+  static Set<Advice> downgradeKotlinStdlib(String sourceSetName) {
+    def from = sourceSetName == 'main' ? 'api' : "${sourceSetName}Api"
+    def to = sourceSetName == 'main' ? 'implementation' : "${sourceSetName}Implementation"
+    return [Advice.ofChange(moduleCoordinates(kotlinStdLib(from)), from, to)]
+  }
+
+  /**
+   * This is a workaround for a deficiency in the algorithm. KGP adds the stdlib to the `api` configuration. If Kotlin
+   * is only used as an implementation detail, then the algo will suggest moving stdlib from api -> implementation.
+   * This advice cannot be followed. We still don't have a good solution for default dependencies added by plugins.
+   */
+  static Set<Advice> removeKotlinStdlib() {
+    return [Advice.ofRemove(moduleCoordinates(kotlinStdLib('api')), 'api')]
   }
 
   private static GradleVariantIdentification defaultGVI(String capability) {

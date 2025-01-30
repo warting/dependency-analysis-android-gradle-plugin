@@ -2,13 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 package com.autonomousapps.tasks
 
-import com.autonomousapps.TASK_GROUP_DEP_INTERNAL
 import com.autonomousapps.internal.utils.bufferWriteJson
 import com.autonomousapps.internal.utils.fromJson
 import com.autonomousapps.internal.utils.getAndDelete
-import com.autonomousapps.model.AndroidManifestCapability
-import com.autonomousapps.model.ProjectVariant
-import com.autonomousapps.model.intermediates.AndroidScoreVariant
+import com.autonomousapps.model.internal.AndroidManifestCapability
+import com.autonomousapps.model.internal.ProjectVariant
+import com.autonomousapps.model.internal.intermediates.AndroidScoreVariant
 import org.gradle.api.DefaultTask
 import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.RegularFileProperty
@@ -23,7 +22,6 @@ abstract class AndroidScoreTask @Inject constructor(
 ) : DefaultTask() {
 
   init {
-    group = TASK_GROUP_DEP_INTERNAL
     description = "Infers if Android project could instead be a JVM project"
   }
 
@@ -71,7 +69,7 @@ abstract class AndroidScoreTask @Inject constructor(
         .filterNot { it.relativePath.endsWith("AndroidManifest.xml") }
         .isNotEmpty()
       val hasBuildConfig = project.codeSource.any { it.relativePath.endsWith("BuildConfig.class") }
-      val usesAndroidClasses = project.usedClasses.any { it.startsWith("android.") }
+      val usesAndroidClasses = project.usedNonAnnotationClasses.any { it.startsWith("android.") }
       val importsAndroidClasses = project.imports.any { it.startsWith("android.") }
       val hasAndroidDependencies = androidDependencies.isNotEmpty()
 

@@ -6,8 +6,9 @@ import com.autonomousapps.internal.isJavaPlatform
 import com.autonomousapps.internal.utils.rootCoordinates
 import com.autonomousapps.internal.utils.toCoordinates
 import com.autonomousapps.model.Coordinates
-import com.autonomousapps.model.DependencyGraphView
+import com.autonomousapps.model.internal.DependencyGraphView
 import com.google.common.graph.Graph
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 import org.gradle.api.artifacts.result.ResolvedComponentResult
 import org.gradle.api.artifacts.result.ResolvedDependencyResult
 
@@ -19,13 +20,16 @@ import org.gradle.api.artifacts.result.ResolvedDependencyResult
 internal class GraphViewBuilder(
   root: ResolvedComponentResult,
   fileCoordinates: Set<Coordinates>,
+  private val localOnly: Boolean = false,
 ) {
 
   val graph: Graph<Coordinates>
 
   private val graphBuilder = DependencyGraphView.newGraphBuilder()
-
   private val visited = mutableSetOf<Coordinates>()
+  private val componentFilter: (ResolvedDependencyResult) -> Boolean = {
+    !localOnly || it.selected.id is ProjectComponentIdentifier
+  }
 
   init {
     val rootId = root.rootCoordinates()
@@ -46,8 +50,10 @@ internal class GraphViewBuilder(
   }
 
   private fun walk(root: ResolvedComponentResult, rootId: Coordinates) {
-    root.dependencies
+    root.dependencies.asSequence()
+      // Only resolved dependencies
       .filterIsInstance<ResolvedDependencyResult>()
+      .filter(componentFilter)
       // AGP adds all runtime dependencies as constraints to the compile classpath, and these show
       // up in the resolution result. Filter them out.
       .filterNot { it.isConstraint }
@@ -55,11 +61,17 @@ internal class GraphViewBuilder(
       .filterNot { it.isJavaPlatform() }
       // Sometimes there is a self-dependency?
       .filterNot { it.toCoordinates() == rootId }
-      .forEach { dependencyResult ->
+      .map {
         // Might be from an included build, in which case the coordinates reflect the _requested_ dependency instead of
         // the _resolved_ dependency.
-        val depId = dependencyResult.toCoordinates()
-
+        Pair(it, it.toCoordinates())
+      }
+      // make reproducible output friendly to compare between executions
+      .sortedWith(
+        compareBy<Pair<ResolvedDependencyResult, Coordinates>> { pair -> pair.second.javaClass.simpleName }
+          .thenComparing { pair -> pair.second.identifier }
+      )
+      .forEach { (dependencyResult, depId) ->
         // add an edge
         graphBuilder.putEdge(rootId, depId)
 

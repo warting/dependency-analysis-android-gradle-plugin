@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package com.autonomousapps.tasks
 
-import com.autonomousapps.TASK_GROUP_DEP_INTERNAL
+import com.autonomousapps.DependencyAnalysisPlugin
 import com.autonomousapps.extension.DependenciesHandler.Companion.toLambda
 import com.autonomousapps.internal.advice.DslKind
 import com.autonomousapps.internal.advice.ProjectHealthConsoleReportBuilder
@@ -24,13 +24,19 @@ import org.gradle.api.tasks.*
 abstract class GenerateBuildHealthTask : DefaultTask() {
 
   init {
-    group = TASK_GROUP_DEP_INTERNAL
     description = "Generates json report for build health"
   }
 
   @get:PathSensitive(PathSensitivity.RELATIVE)
   @get:InputFiles
   abstract val projectHealthReports: ConfigurableFileCollection
+
+  @get:Input
+  abstract val postscript: Property<String>
+
+  /** The number of projects (modules) in this build, including the root project. */
+  @get:Input
+  abstract val projectCount: Property<Int>
 
   @get:Input
   abstract val dslKind: Property<DslKind>
@@ -62,8 +68,18 @@ abstract class GenerateBuildHealthTask : DefaultTask() {
     var processorDependencies = 0
     val androidMetricsBuilder = AndroidScoreMetrics.Builder()
 
-    val projectAdvice: Set<ProjectAdvice> = projectHealthReports.files
-      .map { it.fromJson<ProjectAdvice>() }
+    val advice = projectHealthReports.files.map { it.fromJson<ProjectAdvice>() }
+
+    if (isFunctionallyEmpty(advice)) {
+      logger.warn(
+        """
+          No project health reports found. Is '${DependencyAnalysisPlugin.ID}' not applied to any subprojects in this build?
+          See https://github.com/autonomousapps/dependency-analysis-gradle-plugin/wiki/Adding-to-your-project
+        """.trimIndent()
+      )
+    }
+
+    val projectAdvice: Set<ProjectAdvice> = advice.asSequence()
       // we sort here because of the onEach below, where we stream the console output to disk
       .sortedBy { it.projectPath }
       .onEach { projectAdvice ->
@@ -73,6 +89,8 @@ abstract class GenerateBuildHealthTask : DefaultTask() {
           // console report
           val report = ProjectHealthConsoleReportBuilder(
             projectAdvice = projectAdvice,
+            // For buildHealth, we want to include the postscript only once.
+            postscript = "",
             dslKind = dslKind.get(),
             dependencyMap = dependencyMap.get().toLambda()
           ).text
@@ -118,9 +136,28 @@ abstract class GenerateBuildHealthTask : DefaultTask() {
     output.bufferWriteJson(buildHealth)
     outputFail.writeText(shouldFail.toString())
 
-    // This file must always exist, even if empty
     if (!didWrite) {
+      // This file must always exist, even if empty
       consoleOutput.writeText("")
+    } else {
+      // Append postscript if it exists
+      val ps = postscript.get()
+      if (ps.isNotEmpty()) {
+        consoleOutput.appendText("\n\n$ps")
+      }
     }
+  }
+
+  private fun isFunctionallyEmpty(advice: Collection<ProjectAdvice>): Boolean {
+    // if there's no advice, then advice is functionally empty
+    if (advice.isEmpty()) return true
+
+    // if there's one piece of advice, and it's for the root project, and this build has more than one project, then
+    // advice is functionally empty
+    if (advice.size == 1 && advice.singleOrNull { it.projectPath == ":" } != null) {
+      return projectCount.get() != 1
+    }
+
+    return false
   }
 }

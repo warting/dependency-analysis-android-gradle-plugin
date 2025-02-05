@@ -7,21 +7,14 @@ import com.autonomousapps.internal.ClassNames.canonicalize
 import com.autonomousapps.internal.utils.DESC_REGEX
 import com.autonomousapps.internal.utils.allItems
 import com.autonomousapps.internal.utils.flatMapToSet
-import com.autonomousapps.model.intermediates.ExplodingAbi
+import com.autonomousapps.model.internal.intermediates.consumer.ExplodingAbi
 import java.io.File
-import java.util.jar.JarFile
 
 internal fun computeAbi(
   classFiles: Set<File>,
   exclusions: AbiExclusions,
   abiDumpFile: File? = null
 ): Set<ExplodingAbi> = getBinaryAPI(classFiles).explodedAbi(exclusions, abiDumpFile)
-
-internal fun computeAbi(
-  jarFile: File,
-  exclusions: AbiExclusions,
-  abiDumpFile: File? = null
-): Set<ExplodingAbi> = getBinaryAPI(JarFile(jarFile)).explodedAbi(exclusions, abiDumpFile)
 
 private fun List<ClassBinarySignature>.explodedAbi(
   exclusions: AbiExclusions,
@@ -73,7 +66,7 @@ private fun List<ClassBinarySignature>.explodedAbi(
           // We don't report that the JDK is part of the ABI
           .filterNot { it.startsWith("java/") }
           .map { canonicalize(it) }
-          .toSortedSet()
+          .toSortedSet(),
       )
     }.toSortedSet()
 }

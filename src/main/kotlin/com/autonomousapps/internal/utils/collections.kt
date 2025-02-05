@@ -6,7 +6,7 @@ import org.gradle.api.artifacts.ArtifactCollection
 import org.gradle.api.artifacts.result.ResolvedArtifactResult
 import org.gradle.api.file.FileCollection
 import org.gradle.internal.component.local.model.OpaqueComponentIdentifier
-import org.w3c.dom.*
+import java.io.File
 import java.util.Collections
 import java.util.TreeSet
 import java.util.zip.ZipEntry
@@ -37,27 +37,34 @@ internal fun ZipFile.asClassFiles(): Set<ZipEntry> {
 
 internal fun ZipFile.asSequenceOfClassFiles(): Sequence<ZipEntry> {
   return entries().asSequence().filter {
-    it.name.endsWith(".class") && it.name != "module-info.class"
+    it.name.endsWith(".class") && !it.name.endsWith("module-info.class")
   }
 }
 
 /** Filters a collection of [ZipEntry]s to contain only class files (and not the module-info.class file). */
 internal fun Iterable<ZipEntry>.filterToSetOfClassFiles(): Set<ZipEntry> {
   return filterToSet {
-    it.name.endsWith(".class") && it.name != "module-info.class"
+    it.name.endsWith(".class") && !it.name.endsWith("module-info.class")
   }
 }
 
 /** Filters a collection of [ZipEntry]s to contain only class files (and not the module-info.class file). */
 internal fun Iterable<ZipEntry>.asSequenceOfClassFiles(): Sequence<ZipEntry> {
   return asSequence().filter {
-    it.name.endsWith(".class") && it.name != "module-info.class"
+    it.name.endsWith(".class") && !it.name.endsWith("module-info.class")
   }
 }
 
-/**
- * Filters a [FileCollection] to contain only class files.
- */
+// Can't use Iterable<File> because of signature clash with Iterable<ZipEntry> above.
+internal fun Collection<File>.asSequenceOfClassFiles(): Sequence<File> {
+  return asSequence().filter { it.extension == "class" && !it.name.endsWith("module-info.class") }
+}
+
+internal fun Iterable<File>.filterToClassFiles(): List<File> {
+  return filter { it.extension == "class" && !it.name.endsWith("module-info.class") }
+}
+
+/** Filters a [FileCollection] to contain only class files. */
 internal fun FileCollection.filterToClassFiles(): FileCollection {
   return filter {
     it.isFile && it.name.endsWith(".class")
@@ -81,7 +88,7 @@ internal inline fun <T> Iterable<T>.filterNotToOrderedSet(predicate: (T) -> Bool
 }
 
 internal inline fun <T> Iterable<T>.filterToOrderedSet(
-  comparator: Comparator<T>, predicate: (T) -> Boolean
+  comparator: Comparator<T>, predicate: (T) -> Boolean,
 ): Set<T> {
   return filterTo(TreeSet(comparator), predicate)
 }
@@ -128,78 +135,19 @@ internal inline fun <T, R : Any> Iterable<T>.mapNotNullToOrderedSet(transform: (
   return mapNotNullTo(TreeSet(), transform)
 }
 
-internal inline fun <R> NodeList.mapNotNull(transform: (Node) -> R?): List<R> {
-  val destination = ArrayList<R>(length)
-  for (i in 0 until length) {
-    transform(item(i))?.let { destination.add(it) }
-  }
-  return destination
-}
-
-internal inline fun <R> NodeList.map(transform: (Node) -> R): List<R> {
-  val destination = ArrayList<R>(length)
-  for (i in 0 until length) {
-    destination.add(transform(item(i)))
-  }
-  return destination
-}
-
-internal inline fun <R> NodeList.mapToSet(transform: (Node) -> R): Set<R> {
-  val destination = HashSet<R>(length)
-  for (i in 0 until length) {
-    destination.add(transform(item(i)))
-  }
-  return destination
-}
-
-internal inline fun NodeList.filter(predicate: (Node) -> Boolean): List<Node> {
-  val destination = ArrayList<Node>(length)
-  for (i in 0 until length) {
-    if (predicate(item(i))) destination.add(item(i))
-  }
-  return destination
-}
-
-internal fun <R> NamedNodeMap.map(transform: (Node) -> R): List<R> {
-  val destination = ArrayList<R>()
-  for (i in 0 until length) {
-    destination.add(transform(item(i)))
-  }
-  return destination
-}
-
-internal fun <R> Iterable<NamedNodeMap>.flatMap(transform: (Node) -> R): List<R> {
-  val destination = ArrayList<R>()
-
-  for (it in this) {
-    for (i in 0 until it.length) {
-      destination.add(transform(it.item(i)))
-    }
-  }
-
-  return destination
-}
-
-internal fun Document.attrs(): List<Pair<String, String>> {
-  return getElementsByTagName("*")
-    .map { it.attributes }
-    // this flatMap looks redundant but isn't!
-    .flatMap { it }
-    .filterIsInstance<Attr>()
-    .map { it.name to it.value }
-}
-
-internal fun Document.contentReferences(): Map<String, String> {
-  return getElementsByTagName("*")
-    .map { it.textContent }
-    .filter { it.startsWith('@') }
-    // placeholder value; meaningless.
-    .associateBy { "DIRECT-REFERENCE" }
+/**
+ * Sort elements keeping Comparable-equal elements (stable sorting).
+ * This method has different semantics with standard toSortedSet(Comparator).
+ */
+internal fun <T> Collection<T>.softSortedSet(comparator: Comparator<in T>): Set<T> {
+  val list = ArrayList(this)
+  list.sortWith(comparator)
+  return LinkedHashSet(list)
 }
 
 internal inline fun <T> Iterable<T>.mutPartitionOf(
   predicate1: (T) -> Boolean,
-  predicate2: (T) -> Boolean
+  predicate2: (T) -> Boolean,
 ): Pair<MutableSet<T>, MutableSet<T>> {
   val first = LinkedHashSet<T>()
   val second = LinkedHashSet<T>()

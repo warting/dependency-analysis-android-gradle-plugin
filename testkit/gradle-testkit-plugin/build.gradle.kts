@@ -6,12 +6,12 @@ plugins {
   id("java-gradle-plugin")
   id("com.gradle.plugin-publish")
   id("convention")
-  id("org.jetbrains.dokka")
+  alias(libs.plugins.dokka)
   alias(libs.plugins.dependencyAnalysis)
   id("com.autonomousapps.testkit")
 }
 
-version = "0.9-SNAPSHOT"
+version = "0.13-SNAPSHOT"
 val isSnapshot: Boolean = version.toString().endsWith("SNAPSHOT")
 val isRelease: Boolean = !isSnapshot
 
@@ -102,12 +102,4 @@ tasks.register("publishEverywhere") {
 
   group = "publishing"
   description = "Publishes to Plugin Portal and Maven Central"
-}
-
-dependencyAnalysis {
-  issues {
-    onAny {
-      severity("fail")
-    }
-  }
 }

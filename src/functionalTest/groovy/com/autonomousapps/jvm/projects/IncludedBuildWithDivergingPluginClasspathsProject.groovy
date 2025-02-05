@@ -34,7 +34,7 @@ final class IncludedBuildWithDivergingPluginClasspathsProject extends AbstractPr
       .withIncludedBuild('second-build') { second ->
         second.withRootProject { r ->
           r.withBuildScript { bs ->
-            bs.plugins = [Plugins.dependencyAnalysis, Plugins.kotlinNoApply, Plugin.javaLibrary]
+            bs.plugins = [Plugins.dependencyAnalysis, Plugins.kotlinJvmNoApply, Plugin.javaLibrary]
             if (divergingPluginClasspaths) bs.plugins.add(Plugins.springBoot)
             bs.additions = printServiceObject
           }

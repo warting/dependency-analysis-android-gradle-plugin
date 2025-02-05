@@ -26,18 +26,15 @@ final class DuplicatedDependenciesProject extends AbstractProject {
   }
 
   private GradleProject build() {
-    def builder = newGradleProjectBuilder()
-    builder.withSubproject('proj') { s ->
-      s.sources = sources
-      s.withBuildScript { bs ->
-        bs.plugins = [Plugin.javaLibrary]
-        bs.dependencies = [commonsCollectionsRuntimeOnly, commonsCollectionsImplementation]
+    return newGradleProjectBuilder()
+      .withSubproject('proj') { s ->
+        s.sources = sources
+        s.withBuildScript { bs ->
+          bs.plugins = javaLibrary
+          bs.dependencies = [commonsCollectionsRuntimeOnly, commonsCollectionsImplementation]
+        }
       }
-    }
-
-    def project = builder.build()
-    project.writer().write()
-    return project
+      .write()
   }
 
   private List<Source> sources = [
@@ -63,7 +60,7 @@ final class DuplicatedDependenciesProject extends AbstractProject {
 
   private final Set<Advice> projAdvice = [
     // This test project makes sure that the 'runtimeOnly' dependency does not shadow the 'implementation'
-    // dependency to the same module during analysis. Which in the past let to a wrong advice
+    // dependency to the same module during analysis. Which in the past led to a wrong advice
     // (remove implementation dependency). Reporting duplicated declarations, and recommending removing the ones that
     // do not add anything, is out of scope right now.
     // Advice.ofRemove(moduleCoordinates(commonsCollectionsRuntimeOnly), commonsCollectionsRuntimeOnly.configuration)

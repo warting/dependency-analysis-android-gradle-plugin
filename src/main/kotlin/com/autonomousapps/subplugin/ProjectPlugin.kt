@@ -2,18 +2,18 @@
 // SPDX-License-Identifier: Apache-2.0
 package com.autonomousapps.subplugin
 
+import com.android.build.api.artifact.Artifacts
 import com.android.build.api.dsl.CommonExtension
 import com.android.build.api.variant.AndroidComponentsExtension
 import com.android.build.api.variant.HasAndroidTest
 import com.android.build.api.variant.Sources
+import com.autonomousapps.AbstractExtension
 import com.autonomousapps.DependencyAnalysisExtension
 import com.autonomousapps.DependencyAnalysisSubExtension
 import com.autonomousapps.Flags.androidIgnoredVariants
 import com.autonomousapps.Flags.projectPathRegex
 import com.autonomousapps.Flags.shouldAnalyzeTests
-import com.autonomousapps.getExtension
 import com.autonomousapps.internal.*
-import com.autonomousapps.internal.GradleVersions.isAtLeastGradle82
 import com.autonomousapps.internal.advice.DslKind
 import com.autonomousapps.internal.analyzer.*
 import com.autonomousapps.internal.android.AgpVersion
@@ -21,41 +21,50 @@ import com.autonomousapps.internal.artifacts.DagpArtifacts
 import com.autonomousapps.internal.artifacts.Publisher.Companion.interProjectPublisher
 import com.autonomousapps.internal.utils.addAll
 import com.autonomousapps.internal.utils.log
+import com.autonomousapps.internal.utils.project.buildPath
 import com.autonomousapps.internal.utils.toJson
+import com.autonomousapps.model.DuplicateClass
 import com.autonomousapps.model.declaration.SourceSetKind
 import com.autonomousapps.model.declaration.Variant
+import com.autonomousapps.services.GlobalDslService
 import com.autonomousapps.services.InMemoryCache
 import com.autonomousapps.tasks.*
 import org.gradle.api.NamedDomainObjectSet
 import org.gradle.api.Project
 import org.gradle.api.UnknownTaskException
-import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 import org.gradle.api.file.RegularFile
 import org.gradle.api.provider.Provider
 import org.gradle.api.tasks.SourceSet
 import org.gradle.api.tasks.SourceSetContainer
 import org.gradle.api.tasks.TaskProvider
-import org.gradle.kotlin.dsl.*
+import org.gradle.kotlin.dsl.get
+import org.gradle.kotlin.dsl.property
+import org.gradle.kotlin.dsl.register
+import org.gradle.kotlin.dsl.the
 import org.jetbrains.kotlin.gradle.dsl.KotlinProjectExtension
 import java.util.concurrent.atomic.AtomicBoolean
 
-private const val ANDROID_APP_PLUGIN = "com.android.application"
-private const val ANDROID_LIBRARY_PLUGIN = "com.android.library"
 private const val APPLICATION_PLUGIN = "application"
 private const val JAVA_LIBRARY_PLUGIN = "java-library"
 private const val JAVA_PLUGIN = "java"
+private const val SCALA_PLUGIN = "scala"
+
+private const val ANDROID_APP_PLUGIN = "com.android.application"
+private const val ANDROID_LIBRARY_PLUGIN = "com.android.library"
+private const val KOTLIN_ANDROID_PLUGIN = "org.jetbrains.kotlin.android"
+private const val KOTLIN_JVM_PLUGIN = "org.jetbrains.kotlin.jvm"
 
 private const val GRETTY_PLUGIN = "org.gretty"
 private const val SPRING_BOOT_PLUGIN = "org.springframework.boot"
 
-/** This plugin can be applied along with java-library, so needs special care */
-private const val KOTLIN_JVM_PLUGIN = "org.jetbrains.kotlin.jvm"
-
 /** This "plugin" is applied to every project in a build. */
 internal class ProjectPlugin(private val project: Project) {
 
-  /** Used by non-root projects. */
-  private var subExtension: DependencyAnalysisSubExtension? = null
+  private val dagpExtension: AbstractExtension = if (project == project.rootProject) {
+    project.extensions.getByType(DependencyAnalysisExtension::class.java)
+  } else {
+    DependencyAnalysisSubExtension.of(project)
+  }
 
   /**
    * Used as a gate to prevent this plugin from configuring a project more than once. If ever
@@ -74,27 +83,32 @@ internal class ProjectPlugin(private val project: Project) {
   /** We only want to register the aggregation tasks if the by-variants tasks are registered. */
   private val aggregatorsRegistered = AtomicBoolean(false)
 
-  private lateinit var findDeclarationsTask: TaskProvider<FindDeclarationsTask>
-  private lateinit var redundantJvmPlugin: RedundantJvmPlugin
   private lateinit var computeAdviceTask: TaskProvider<ComputeAdviceTask>
-  private lateinit var reasonTask: TaskProvider<ReasonTask>
   private lateinit var computeResolvedDependenciesTask: TaskProvider<ComputeResolvedDependenciesTask>
+  private lateinit var findDeclarationsTask: TaskProvider<FindDeclarationsTask>
+  private lateinit var mergeProjectGraphsTask: TaskProvider<MergeProjectGraphsTask>
+  private lateinit var reasonTask: TaskProvider<ReasonTask>
+  private lateinit var redundantJvmPlugin: RedundantJvmPlugin
 
   private val isDataBindingEnabled = project.objects.property<Boolean>().convention(false)
   private val isViewBindingEnabled = project.objects.property<Boolean>().convention(false)
 
   private val projectHealthPublisher = interProjectPublisher(
     project = project,
-    artifact = DagpArtifacts.Kind.PROJECT_HEALTH
+    artifact = DagpArtifacts.Kind.PROJECT_HEALTH,
   )
   private val resolvedDependenciesPublisher = interProjectPublisher(
     project = project,
-    artifact = DagpArtifacts.Kind.RESOLVED_DEPS
+    artifact = DagpArtifacts.Kind.RESOLVED_DEPS,
+  )
+  private val combinedGraphPublisher = interProjectPublisher(
+    project = project,
+    artifact = DagpArtifacts.Kind.COMBINED_GRAPH,
   )
 
-  fun apply() = project.run {
-    createSubExtension()
+  private val dslService = GlobalDslService.of(project)
 
+  fun apply() = project.run {
     // Conditionally disable analysis on some projects
     val projectPathRegex = projectPathRegex()
     if (!projectPathRegex.matches(path)) {
@@ -102,17 +116,27 @@ internal class ProjectPlugin(private val project: Project) {
       return
     }
 
+    // Hydrate dependencies map with version catalog entries
+    dslService.get().withVersionCatalogs(this)
+
+    maybeConfigureExcludes()
+
+    // Android plugins cannot be wrapped in afterEvaluate because of strict lifecycle checks around access to AGP DSL
+    // objects.
+    pluginManager.withPlugin(ANDROID_APP_PLUGIN) {
+      logger.log("Adding Android tasks to $path")
+      checkAgpOnClasspath()
+      configureAndroidAppProject()
+    }
+    pluginManager.withPlugin(ANDROID_LIBRARY_PLUGIN) {
+      logger.log("Adding Android tasks to $path")
+      checkAgpOnClasspath()
+      configureAndroidLibProject()
+    }
+
     // Giving up. Wrap the whole thing in afterEvaluate for simplicity and for access to user configuration via
     // extension.
     afterEvaluate {
-      pluginManager.withPlugin(ANDROID_APP_PLUGIN) {
-        logger.log("Adding Android tasks to ${project.path}")
-        configureAndroidAppProject()
-      }
-      pluginManager.withPlugin(ANDROID_LIBRARY_PLUGIN) {
-        logger.log("Adding Android tasks to ${project.path}")
-        configureAndroidLibProject()
-      }
       pluginManager.withPlugin(APPLICATION_PLUGIN) {
         logger.log("Adding JVM tasks to ${project.path}")
         configureJavaAppProject()
@@ -123,6 +147,7 @@ internal class ProjectPlugin(private val project: Project) {
       }
       pluginManager.withPlugin(KOTLIN_JVM_PLUGIN) {
         logger.log("Adding Kotlin-JVM tasks to ${project.path}")
+        checkKgpOnClasspath()
         configureKotlinJvmProject()
       }
       pluginManager.withPlugin(JAVA_PLUGIN) {
@@ -131,13 +156,59 @@ internal class ProjectPlugin(private val project: Project) {
     }
   }
 
-  private fun Project.createSubExtension() {
-    if (this != rootProject) {
-      // TODO this doesn't really work. Was trying to make plugin compatible with convention plugin approach
-      val rootExtProvider = {
-        rootProject.extensions.findByType<DependencyAnalysisExtension>()!!
+  /**
+   * Certain plugins expect certain dependencies to be available in a way that limits user ability to change. So, we
+   * configure DAGP to exclude those dependencies from health reports.
+   */
+  private fun Project.maybeConfigureExcludes() {
+    /*
+     * TODO(tsr): user control over the Kotlin stdlib is of a different nature than other dependencies. KGP will add
+     *  this automatically to every `api`-like configuration, unless users add `kotlin.stdlib.default.dependency=false`
+     *  to their `gradle.properties` file. As such, advice regarding this dependency needs to be handled with more care.
+     *  Deal with this in a follow-up. Some kind of DSL opt-in or opt-out.
+     */
+
+    // If it's a Kotlin project, users have limited ability to make changes to the stdlib.
+    pluginManager.withPlugin(KOTLIN_JVM_PLUGIN) {
+      dagpExtension.issueHandler.project(path) {
+        onAny {
+          exclude("org.jetbrains.kotlin:kotlin-stdlib")
+        }
       }
-      subExtension = extensions.create(DependencyAnalysisExtension.NAME, objects, rootExtProvider, path)
+    }
+    pluginManager.withPlugin(KOTLIN_ANDROID_PLUGIN) {
+      dagpExtension.issueHandler.project(path) {
+        onAny {
+          exclude("org.jetbrains.kotlin:kotlin-stdlib")
+        }
+      }
+    }
+
+    // If it's a Scala project, it needs the scala-library dependency.
+    pluginManager.withPlugin(SCALA_PLUGIN) {
+      dagpExtension.issueHandler.project(path) {
+        onUnusedDependencies {
+          exclude("org.scala-lang:scala-library")
+        }
+      }
+    }
+  }
+
+  private fun checkAgpOnClasspath() {
+    try {
+      @Suppress("UNUSED_VARIABLE")
+      val a = AndroidComponentsExtension::class.java
+    } catch (_: Throwable) {
+      dslService.get().notifyAgpMissing()
+    }
+  }
+
+  private fun checkKgpOnClasspath() {
+    try {
+      @Suppress("UNUSED_VARIABLE")
+      val k = KotlinProjectExtension::class.java
+    } catch (_: Throwable) {
+      dslService.get().notifyKgpMissing()
     }
   }
 
@@ -161,7 +232,13 @@ internal class ProjectPlugin(private val project: Project) {
         }
 
         mainSourceSets.let { sourceSets ->
-          val variantSourceSet = newVariantSourceSet(variant.name, SourceSetKind.MAIN, variant, sourceSets)
+          val variantSourceSet = newVariantSourceSet(
+            variantName = variant.name,
+            kind = SourceSetKind.MAIN,
+            variant = variant,
+            agpArtifacts = variant.artifacts,
+            sources = sourceSets,
+          )
           val dependencyAnalyzer = AndroidAppAnalyzer(
             project = project,
             variant = DefaultAndroidVariant(project, variant),
@@ -174,7 +251,13 @@ internal class ProjectPlugin(private val project: Project) {
         }
 
         unitTestSourceSets?.let { sourceSets ->
-          val variantSourceSet = newVariantSourceSet(variant.name, SourceSetKind.TEST, variant, sourceSets)
+          val variantSourceSet = newVariantSourceSet(
+            variantName = variant.name,
+            kind = SourceSetKind.TEST,
+            variant = variant,
+            agpArtifacts = variant.unitTest!!.artifacts,
+            sources = sourceSets,
+          )
           val dependencyAnalyzer = AndroidAppAnalyzer(
             project = project,
             variant = DefaultAndroidVariant(project, variant),
@@ -187,7 +270,13 @@ internal class ProjectPlugin(private val project: Project) {
         }
 
         androidTestSourceSets?.let { sourceSets ->
-          val variantSourceSet = newVariantSourceSet(variant.name, SourceSetKind.ANDROID_TEST, variant, sourceSets)
+          val variantSourceSet = newVariantSourceSet(
+            variantName = variant.name,
+            kind = SourceSetKind.ANDROID_TEST,
+            variant = variant,
+            agpArtifacts = (variant as HasAndroidTest).androidTest!!.artifacts,
+            sources = sourceSets,
+          )
           val dependencyAnalyzer = AndroidAppAnalyzer(
             project = this@configureAndroidAppProject,
             variant = DefaultAndroidVariant(project, variant),
@@ -222,12 +311,19 @@ internal class ProjectPlugin(private val project: Project) {
         }
 
         mainSourceSets.let { sourceSets ->
-          val variantSourceSet = newVariantSourceSet(variant.name, SourceSetKind.MAIN, variant, sourceSets)
+          val variantSourceSet = newVariantSourceSet(
+            variantName = variant.name,
+            kind = SourceSetKind.MAIN,
+            variant = variant,
+            agpArtifacts = variant.artifacts,
+            sources = sourceSets,
+          )
           val dependencyAnalyzer = AndroidLibAnalyzer(
             project = project,
             variant = DefaultAndroidVariant(project, variant),
             agpVersion = agpVersion,
-            androidSources = variantSourceSet
+            androidSources = variantSourceSet,
+            hasAbi = true,
           )
           isDataBindingEnabled.set(dependencyAnalyzer.isDataBindingEnabled)
           isViewBindingEnabled.set(dependencyAnalyzer.isViewBindingEnabled)
@@ -235,12 +331,19 @@ internal class ProjectPlugin(private val project: Project) {
         }
 
         unitTestSourceSets?.let { sourceSets ->
-          val variantSourceSet = newVariantSourceSet(variant.name, SourceSetKind.TEST, variant, sourceSets)
+          val variantSourceSet = newVariantSourceSet(
+            variantName = variant.name,
+            kind = SourceSetKind.TEST,
+            variant = variant,
+            agpArtifacts = variant.unitTest!!.artifacts,
+            sources = sourceSets,
+          )
           val dependencyAnalyzer = AndroidLibAnalyzer(
             project = project,
             variant = DefaultAndroidVariant(project, variant),
             agpVersion = agpVersion,
-            androidSources = variantSourceSet
+            androidSources = variantSourceSet,
+            hasAbi = false,
           )
           isDataBindingEnabled.set(dependencyAnalyzer.isDataBindingEnabled)
           isViewBindingEnabled.set(dependencyAnalyzer.isViewBindingEnabled)
@@ -248,12 +351,19 @@ internal class ProjectPlugin(private val project: Project) {
         }
 
         androidTestSourceSets?.let { sourceSets ->
-          val variantSourceSet = newVariantSourceSet(variant.name, SourceSetKind.ANDROID_TEST, variant, sourceSets)
+          val variantSourceSet = newVariantSourceSet(
+            variantName = variant.name,
+            kind = SourceSetKind.ANDROID_TEST,
+            variant = variant,
+            agpArtifacts = (variant as HasAndroidTest).androidTest!!.artifacts,
+            sources = sourceSets,
+          )
           val dependencyAnalyzer = AndroidLibAnalyzer(
             project = project,
             variant = DefaultAndroidVariant(project, variant),
             agpVersion = agpVersion,
-            androidSources = variantSourceSet
+            androidSources = variantSourceSet,
+            hasAbi = false,
           )
           isDataBindingEnabled.set(dependencyAnalyzer.isDataBindingEnabled)
           isViewBindingEnabled.set(dependencyAnalyzer.isViewBindingEnabled)
@@ -267,15 +377,38 @@ internal class ProjectPlugin(private val project: Project) {
     variantName: String,
     kind: SourceSetKind,
     variant: com.android.build.api.variant.Variant,
+    agpArtifacts: Artifacts,
     sources: Sources,
-  ): AndroidSources = DefaultAndroidSources(
-    project = project,
-    sources = sources,
-    agpVariant = variant,
-    variant = Variant(variantName, kind),
-    compileClasspathConfigurationName = kind.compileClasspathConfigurationName(variantName),
-    runtimeClasspathConfigurationName = kind.runtimeClasspathConfigurationName(variantName),
-  )
+  ): AndroidSources {
+    // https://github.com/autonomousapps/dependency-analysis-gradle-plugin/issues/1111
+    // https://issuetracker.google.com/issues/325307775
+    // if ~/.android/analytics.settings has `hasOptedIn` set to `true`, then
+    // `./gradlew :app:explodeXmlSourceDebugTest --no-daemon` will fail. This only happens for unit test analysis.
+    // Running "AndroidTestDependenciesSpec.transitive test dependencies should be declared on testImplementation*" will
+    // reproduce this error. I don't yet know how to set up a test environment that can reproduce that failure
+    // hermetically (that is, without having to adjust my user home directory).
+    return if (kind == SourceSetKind.TEST) {
+      TestAndroidSources(
+        project = project,
+        sources = sources,
+        primaryAgpVariant = variant,
+        agpArtifacts = agpArtifacts,
+        variant = Variant(variantName, kind),
+        compileClasspathConfigurationName = kind.compileClasspathConfigurationName(variantName),
+        runtimeClasspathConfigurationName = kind.runtimeClasspathConfigurationName(variantName),
+      )
+    } else {
+      DefaultAndroidSources(
+        project = project,
+        sources = sources,
+        primaryAgpVariant = variant,
+        agpArtifacts = agpArtifacts,
+        variant = Variant(variantName, kind),
+        compileClasspathConfigurationName = kind.compileClasspathConfigurationName(variantName),
+        runtimeClasspathConfigurationName = kind.runtimeClasspathConfigurationName(variantName),
+      )
+    }
+  }
 
   // Scenarios (this comment is a bit outdated)
   // 1.  Has application, and then kotlin-jvm applied (in that order):
@@ -327,7 +460,7 @@ internal class ProjectPlugin(private val project: Project) {
         return
       }
 
-      val j = JavaSources(this)
+      val j = JavaSources(this, dagpExtension)
       j.sourceSets.forEach { sourceSet ->
         try {
           analyzeDependencies(
@@ -346,7 +479,7 @@ internal class ProjectPlugin(private val project: Project) {
 
   /** Has the `java-library` plugin applied. */
   private fun Project.configureJavaLibProject() {
-    val j = JavaSources(this)
+    val j = JavaSources(this, dagpExtension)
 
     configureRedundantJvmPlugin {
       it.withJava(j.hasJava)
@@ -409,7 +542,7 @@ internal class ProjectPlugin(private val project: Project) {
    * If it isn't, this is a library project.
    */
   private fun Project.configureKotlinJvmProject() {
-    val k = KotlinSources(this)
+    val k = KotlinSources(this, dagpExtension)
 
     configureRedundantJvmPlugin {
       it.withKotlin(k.hasKotlin)
@@ -449,7 +582,7 @@ internal class ProjectPlugin(private val project: Project) {
   }
 
   private fun Project.hasAbi(sourceSet: SourceSet): Boolean {
-    if (sourceSet.name in getExtension().abiHandler.exclusionsHandler.excludedSourceSets.get()) {
+    if (sourceSet.name in dagpExtension.abiHandler.exclusionsHandler.excludedSourceSets.get()) {
       // if this sourceSet is user-excluded, then it doesn't have an ABI
       return false
     }
@@ -467,7 +600,8 @@ internal class ProjectPlugin(private val project: Project) {
     pluginManager.hasPlugin(APPLICATION_PLUGIN) ||
       pluginManager.hasPlugin(SPRING_BOOT_PLUGIN) ||
       pluginManager.hasPlugin(GRETTY_PLUGIN) ||
-      pluginManager.hasPlugin(ANDROID_APP_PLUGIN)
+      pluginManager.hasPlugin(ANDROID_APP_PLUGIN) ||
+      dagpExtension.forceAppProject
 
   /* ===============================================
    * The main work of the plugin happens below here.
@@ -482,7 +616,7 @@ internal class ProjectPlugin(private val project: Project) {
       redundantJvmPlugin = RedundantJvmPlugin(
         project = this,
         computeAdviceTask = computeAdviceTask,
-        redundantPluginsBehavior = getExtension().issueHandler.redundantPluginsIssueFor(projectPath)
+        redundantPluginsBehavior = dagpExtension.issueHandler.redundantPluginsIssueFor(projectPath)
       )
     }
 
@@ -496,6 +630,7 @@ internal class ProjectPlugin(private val project: Project) {
   private fun Project.analyzeDependencies(dependencyAnalyzer: DependencyAnalyzer) {
     configureAggregationTasks()
 
+    val theRootDir = rootDir
     val thisProjectPath = path
     val variantName = dependencyAnalyzer.variantName
     val taskNameSuffix = dependencyAnalyzer.taskNameSuffix
@@ -546,6 +681,15 @@ internal class ProjectPlugin(private val project: Project) {
       outputRuntimeDot.set(outputPaths.runtimeGraphDotPath)
     }
 
+    reasonTask.configure {
+      dependencyGraphViews.add(graphViewTask.flatMap { it.output /* compile graph */ })
+      dependencyGraphViews.add(graphViewTask.flatMap { it.outputRuntime })
+    }
+
+    /*
+     * Optional utility tasks (not part of buildHealth). Here because they can easily utilize DAGP's infrastructure.
+     */
+
     // This is an optional task that only works for Gradle 7.5+
     if (GradleVersions.isAtLeastGradle75) {
       val resolveExternalDependencies =
@@ -566,26 +710,30 @@ internal class ProjectPlugin(private val project: Project) {
 
     val computeDominatorCompile =
       tasks.register<ComputeDominatorTreeTask>("computeDominatorTreeCompile$taskNameSuffix") {
+        buildPath.set(buildPath(dependencyAnalyzer.compileConfigurationName))
         projectPath.set(thisProjectPath)
         physicalArtifacts.set(artifactsReport.flatMap { it.output })
         graphView.set(graphViewTask.flatMap { it.output })
 
         outputTxt.set(outputPaths.compileDominatorConsolePath)
         outputDot.set(outputPaths.compileDominatorGraphPath)
+        outputJson.set(outputPaths.compileDominatorJsonPath)
       }
 
     val computeDominatorRuntime =
       tasks.register<ComputeDominatorTreeTask>("computeDominatorTreeRuntime$taskNameSuffix") {
+        buildPath.set(buildPath(dependencyAnalyzer.runtimeConfigurationName))
         projectPath.set(thisProjectPath)
         physicalArtifacts.set(artifactsReportRuntime.flatMap { it.output })
         graphView.set(graphViewTask.flatMap { it.outputRuntime })
 
         outputTxt.set(outputPaths.runtimeDominatorConsolePath)
         outputDot.set(outputPaths.runtimeDominatorGraphPath)
+        outputJson.set(outputPaths.runtimeDominatorJsonPath)
       }
 
     // a lifecycle task that computes the dominator tree for both compile and runtime classpaths
-    tasks.register("computerDominatorTree$taskNameSuffix") {
+    tasks.register("computeDominatorTree$taskNameSuffix") {
       dependsOn(computeDominatorCompile, computeDominatorRuntime)
     }
 
@@ -597,9 +745,37 @@ internal class ProjectPlugin(private val project: Project) {
       consoleText.set(computeDominatorRuntime.flatMap { it.outputTxt })
     }
 
-    reasonTask.configure {
-      dependencyGraphViews.add(graphViewTask.flatMap { it.output /* compile graph */ })
-      dependencyGraphViews.add(graphViewTask.flatMap { it.outputRuntime })
+    // Generates graph view of local (project) dependencies
+    val generateProjectGraphTask = tasks.register<GenerateProjectGraphTask>("generateProjectGraph$taskNameSuffix") {
+      buildPath.set(buildPath(dependencyAnalyzer.compileConfigurationName))
+
+      compileClasspath.set(
+        configurations[dependencyAnalyzer.compileConfigurationName]
+          .incoming
+          .resolutionResult
+          .rootComponent
+      )
+      runtimeClasspath.set(
+        configurations[dependencyAnalyzer.runtimeConfigurationName]
+          .incoming
+          .resolutionResult
+          .rootComponent
+      )
+      output.set(outputPaths.projectGraphDir)
+    }
+
+    // Prints some help text relating to generateProjectGraphTask. This is the "user-facing" task.
+    tasks.register<ProjectGraphTask>("projectGraph$taskNameSuffix") {
+      rootDir.set(theRootDir)
+      projectPath.set(thisProjectPath)
+      graphsDir.set(generateProjectGraphTask.flatMap { it.output })
+    }
+
+    // Merges the graphs from generateProjectGraphTask into a single variant-agnostic output.
+    mergeProjectGraphsTask.configure {
+      projectGraphs.add(generateProjectGraphTask.flatMap {
+        it.output.file(GenerateProjectGraphTask.PROJECT_COMBINED_CLASSPATH_JSON)
+      })
     }
 
     /* ******************************
@@ -632,11 +808,11 @@ internal class ProjectPlugin(private val project: Project) {
         androidLinters.set(task.flatMap { it.output })
       }
 
-      output.set(outputPaths.allDeclaredDepsPath)
+      output.set(outputPaths.explodedJarsPath)
     }
 
     // Find the inline members of this project's dependencies.
-    val kotlinMagicTask = tasks.register<FindInlineMembersTask>("findInlineMembers$taskNameSuffix") {
+    val kotlinMagicTask = tasks.register<FindKotlinMagicTask>("findKotlinMagic$taskNameSuffix") {
       inMemoryCacheProvider.set(InMemoryCache.register(project))
       compileClasspath.setFrom(
         configurations[dependencyAnalyzer.compileConfigurationName]
@@ -702,7 +878,7 @@ internal class ProjectPlugin(private val project: Project) {
     // Lists all import declarations in the source of the current project.
     val explodeCodeSourceTask = tasks.register<CodeSourceExploderTask>("explodeCodeSource$taskNameSuffix") {
       groovySourceFiles.setFrom(dependencyAnalyzer.groovySourceFiles)
-      dependencyAnalyzer.javaSourceFiles?.let { javaSourceFiles.setFrom(it) }
+      javaSourceFiles.setFrom(dependencyAnalyzer.javaSourceFiles)
       kotlinSourceFiles.setFrom(dependencyAnalyzer.kotlinSourceFiles)
       scalaSourceFiles.setFrom(dependencyAnalyzer.scalaSourceFiles)
       output.set(outputPaths.explodedSourcePath)
@@ -721,7 +897,7 @@ internal class ProjectPlugin(private val project: Project) {
     // Describes the project's binary API, or ABI. Null for application projects.
     val abiAnalysisTask = dependencyAnalyzer.registerAbiAnalysisTask(provider {
       // lazy ABI JSON
-      with(getExtension().abiHandler.exclusionsHandler) {
+      with(dagpExtension.abiHandler.exclusionsHandler) {
         AbiExclusions(
           annotationExclusions = annotationExclusions.get(),
           classExclusions = classExclusions.get(),
@@ -731,7 +907,7 @@ internal class ProjectPlugin(private val project: Project) {
     })
 
     val usagesExclusionsProvider = provider {
-      with(getExtension().usagesHandler.exclusionsHandler) {
+      with(dagpExtension.usagesHandler.exclusionsHandler) {
         UsagesExclusions(
           classExclusions = classExclusions.get(),
         ).toJson()
@@ -761,6 +937,30 @@ internal class ProjectPlugin(private val project: Project) {
       output.set(outputPaths.syntheticProjectPath)
     }
 
+    // Discover duplicates on compile and runtime classpaths
+    val duplicateClassesCompile =
+      tasks.register<DiscoverClasspathDuplicationTask>("discoverDuplicationForCompile$taskNameSuffix") {
+        withClasspathName(DuplicateClass.COMPILE_CLASSPATH_NAME)
+        setClasspath(
+          configurations[dependencyAnalyzer.compileConfigurationName].artifactsFor(dependencyAnalyzer.attributeValueJar)
+        )
+        syntheticProject.set(synthesizeProjectViewTask.flatMap { it.output })
+        output.set(outputPaths.duplicateCompileClasspathPath)
+      }
+    val duplicateClassesRuntime =
+      tasks.register<DiscoverClasspathDuplicationTask>("discoverDuplicationForRuntime$taskNameSuffix") {
+        withClasspathName(DuplicateClass.RUNTIME_CLASSPATH_NAME)
+        setClasspath(
+          configurations[dependencyAnalyzer.runtimeConfigurationName].artifactsFor(dependencyAnalyzer.attributeValueJar)
+        )
+        syntheticProject.set(synthesizeProjectViewTask.flatMap { it.output })
+        output.set(outputPaths.duplicateCompileRuntimePath)
+      }
+    computeAdviceTask.configure {
+      duplicateClassesReports.add(duplicateClassesCompile.flatMap { it.output })
+      duplicateClassesReports.add(duplicateClassesRuntime.flatMap { it.output })
+    }
+
     /* **************************************
      * Producers -> Consumer. Bring it all together. How does this project (consumer) use its dependencies (producers)?
      ****************************************/
@@ -772,6 +972,8 @@ internal class ProjectPlugin(private val project: Project) {
       dependencies.set(synthesizeDependenciesTask.flatMap { it.outputDir })
       syntheticProject.set(synthesizeProjectViewTask.flatMap { it.output })
       kapt.set(isKaptApplied())
+      duplicateClassesReports.add(duplicateClassesCompile.flatMap { it.output })
+      duplicateClassesReports.add(duplicateClassesRuntime.flatMap { it.output })
       output.set(outputPaths.dependencyTraceReportPath)
     }
 
@@ -805,10 +1007,10 @@ internal class ProjectPlugin(private val project: Project) {
     computeAdviceTask = tasks.register<ComputeAdviceTask>("computeAdvice") {
       projectPath.set(theProjectPath)
       declarations.set(findDeclarationsTask.flatMap { it.output })
-      bundles.set(getExtension().dependenciesHandler.serializableBundles())
+      bundles.set(dagpExtension.dependenciesHandler.serializableBundles())
       supportedSourceSets.set(supportedSourceSetNames())
-      ignoreKtx.set(getExtension().issueHandler.ignoreKtxFor(theProjectPath))
-      ignoreKtx2.set(getExtension().dependenciesHandler.ignoreKtx)
+      ignoreKtx.set(dagpExtension.dependenciesHandler.ignoreKtx)
+      explicitSourceSets.set(dagpExtension.dependenciesHandler.explicitSourceSets)
       kapt.set(isKaptApplied())
 
       output.set(paths.unfilteredAdvicePath)
@@ -824,7 +1026,7 @@ internal class ProjectPlugin(private val project: Project) {
       // ...is filtered by these preferences...
       dataBindingEnabled.set(isDataBindingEnabled)
       viewBindingEnabled.set(isViewBindingEnabled)
-      with(getExtension().issueHandler) {
+      with(dagpExtension.issueHandler) {
         // These all have sourceSet-specific behaviors
         anyBehavior.addAll(anyIssueFor(theProjectPath))
         unusedDependenciesBehavior.addAll(unusedDependenciesIssueFor(theProjectPath))
@@ -833,6 +1035,7 @@ internal class ProjectPlugin(private val project: Project) {
         compileOnlyBehavior.addAll(compileOnlyIssueFor(theProjectPath))
         runtimeOnlyBehavior.addAll(runtimeOnlyIssueFor(theProjectPath))
         unusedProcsBehavior.addAll(unusedAnnotationProcessorsIssueFor(theProjectPath))
+        duplicateClassWarningsBehavior.addAll(onDuplicateClassWarnings(theProjectPath))
 
         // These don't have sourceSet-specific behaviors
         redundantPluginsBehavior.set(redundantPluginsIssueFor(theProjectPath))
@@ -845,19 +1048,22 @@ internal class ProjectPlugin(private val project: Project) {
 
     val generateProjectHealthReport = tasks.register<GenerateProjectHealthReportTask>("generateConsoleReport") {
       projectAdvice.set(filterAdviceTask.flatMap { it.output })
+      postscript.set(dagpExtension.reportingHandler.postscript)
       dslKind.set(DslKind.from(buildFile))
-      dependencyMap.set(getExtension().dependenciesHandler.map)
+      dependencyMap.set(dagpExtension.dependenciesHandler.map)
       output.set(paths.consoleReportPath)
     }
 
     tasks.register<ProjectHealthTask>("projectHealth") {
+      buildFilePath.set(project.buildFile.path)
       projectAdvice.set(filterAdviceTask.flatMap { it.output })
       consoleReport.set(generateProjectHealthReport.flatMap { it.output })
     }
 
     reasonTask = tasks.register<ReasonTask>("reason") {
+      rootProjectName.set(rootProject.name)
       projectPath.set(theProjectPath)
-      dependencyMap.set(getExtension().dependenciesHandler.map)
+      dependencyMap.set(dagpExtension.dependenciesHandler.map)
       dependencyUsageReport.set(computeAdviceTask.flatMap { it.dependencyUsages })
       annotationProcessorUsageReport.set(computeAdviceTask.flatMap { it.annotationProcessorUsages })
       unfilteredAdviceReport.set(computeAdviceTask.flatMap { it.output })
@@ -868,11 +1074,15 @@ internal class ProjectPlugin(private val project: Project) {
     tasks.register<RewriteTask>("fixDependencies") {
       buildScript.set(buildFile)
       projectAdvice.set(filterAdviceTask.flatMap { it.output })
-      dependencyMap.set(getExtension().dependenciesHandler.map)
+      dependencyMap.set(dagpExtension.dependenciesHandler.map)
     }
 
     computeResolvedDependenciesTask = tasks.register<ComputeResolvedDependenciesTask>("computeResolvedDependencies") {
       output.set(paths.resolvedDepsPath)
+    }
+
+    mergeProjectGraphsTask = tasks.register<MergeProjectGraphsTask>("generateMergedProjectGraph") {
+      output.set(paths.mergedProjectGraphPath)
     }
 
     /*
@@ -882,26 +1092,10 @@ internal class ProjectPlugin(private val project: Project) {
     // Store the main output in the extension for consumption by end-users
     storeAdviceOutput(filterAdviceTask.flatMap { it.output })
 
-    // Publish our artifacts, and add project dependencies on root project to this project
+    // Publish our artifacts
+    combinedGraphPublisher.publish(mergeProjectGraphsTask.flatMap { it.output })
     projectHealthPublisher.publish(filterAdviceTask.flatMap { it.output })
     resolvedDependenciesPublisher.publish(computeResolvedDependenciesTask.flatMap { it.output })
-
-    // TODO(tsr): this is cross-project configuration and violates isolated projects (but not CC).
-    //  would prefer to do this at the root, but need to validate in the situation when not every subproject applies
-    //  DAGP.
-    rootProject.dependencies {
-      add(projectHealthPublisher.declarableName, project(path))
-      add(resolvedDependenciesPublisher.declarableName, project(path))
-    }
-  }
-
-  /** Get the buildPath of the current build from the root component of the resolution result. */
-  private fun Project.buildPath(configuration: String) = configurations[configuration].incoming.resolutionResult.let {
-    if (isAtLeastGradle82) {
-      it.rootComponent.map { root -> (root.id as ProjectComponentIdentifier).build.buildPath }
-    } else {
-      project.provider { @Suppress("DEPRECATION") (it.root.id as ProjectComponentIdentifier).build.name }
-    }
   }
 
   private fun Project.isKaptApplied() = providers.provider { plugins.hasPlugin("org.jetbrains.kotlin.kapt") }
@@ -914,12 +1108,12 @@ internal class ProjectPlugin(private val project: Project) {
     if (pluginManager.hasPlugin(ANDROID_APP_PLUGIN) || pluginManager.hasPlugin(ANDROID_LIBRARY_PLUGIN)) {
       extensions.getByType(CommonExtension::class.java)
         .sourceSets
-        .matching { s -> shouldAnalyzeSourceSetForProject(s.name, project.path) }
+        .matching { s -> shouldAnalyzeSourceSetForProject(dagpExtension, s.name, project.path) }
         .map { it.name }
     } else {
       // JVM Plugins
       the<SourceSetContainer>()
-        .matching { s -> shouldAnalyzeSourceSetForProject(s.name, project.path) }
+        .matching { s -> shouldAnalyzeSourceSetForProject(dagpExtension, s.name, project.path) }
         .map { it.name }
     }
   }
@@ -931,38 +1125,38 @@ internal class ProjectPlugin(private val project: Project) {
   }
 
   /** Stores advice output in either root extension or subproject extension. */
-  private fun Project.storeAdviceOutput(advice: Provider<RegularFile>) {
-    if (this == rootProject) {
-      getExtension().storeAdviceOutput(advice)
-    } else {
-      subExtension!!.storeAdviceOutput(advice)
-    }
+  private fun storeAdviceOutput(advice: Provider<RegularFile>) {
+    dagpExtension.storeAdviceOutput(advice)
   }
 
-  private class JavaSources(project: Project) {
+  private class JavaSources(project: Project, dagpExtension: AbstractExtension) {
 
     val sourceSets: NamedDomainObjectSet<SourceSet> = project.the<SourceSetContainer>().matching { s ->
-      project.shouldAnalyzeSourceSetForProject(s.name, project.path)
+      project.shouldAnalyzeSourceSetForProject(dagpExtension, s.name, project.path)
     }
 
     val hasJava: Provider<Boolean> = project.provider { sourceSets.flatMap { it.java() }.isNotEmpty() }
   }
 
   // TODO source set abstractions aren't really working out here.
-  private class KotlinSources(project: Project) {
+  private class KotlinSources(project: Project, dagpExtension: AbstractExtension) {
 
     private val sourceSetContainer = project.the<SourceSetContainer>()
     private val kotlinSourceSets = project.the<KotlinProjectExtension>().sourceSets
 
     val sourceSets: NamedDomainObjectSet<SourceSet> = sourceSetContainer.matching { s ->
-      project.shouldAnalyzeSourceSetForProject(s.name, project.path)
+      project.shouldAnalyzeSourceSetForProject(dagpExtension, s.name, project.path)
     }
 
     val hasKotlin: Provider<Boolean> = project.provider { kotlinSourceSets.flatMap { it.kotlin() }.isNotEmpty() }
   }
 }
 
-private fun Project.shouldAnalyzeSourceSetForProject(sourceSetName: String, projectPath: String): Boolean {
-  return project.getExtension().issueHandler.shouldAnalyzeSourceSet(sourceSetName, projectPath)
+private fun Project.shouldAnalyzeSourceSetForProject(
+  dagpExtension: AbstractExtension,
+  sourceSetName: String,
+  projectPath: String,
+): Boolean {
+  return dagpExtension.issueHandler.shouldAnalyzeSourceSet(sourceSetName, projectPath)
     && (project.shouldAnalyzeTests() || sourceSetName != SourceSet.TEST_SOURCE_SET_NAME)
 }

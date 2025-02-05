@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 plugins {
   id("convention")
-  id("org.jetbrains.dokka")
+  alias(libs.plugins.dokka)
   alias(libs.plugins.dependencyAnalysis)
   id("com.autonomousapps.testkit")
 }
 
-version = "0.15-SNAPSHOT"
+version = "0.18-SNAPSHOT"
 
 dagp {
   version(version)
@@ -42,10 +42,10 @@ dependencies {
   api(platform(libs.kotlin.bom))
   api(gradleTestKit())
 
-  implementation(libs.truth)
-
   testImplementation(platform(libs.junit.bom))
   testImplementation(libs.junit.api)
+  testImplementation(libs.truth)
+
   testRuntimeOnly(libs.junit.engine)
 
   dokkaHtmlPlugin(libs.kotlin.dokka)

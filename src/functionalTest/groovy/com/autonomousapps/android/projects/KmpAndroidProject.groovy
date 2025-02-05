@@ -6,7 +6,6 @@ import com.autonomousapps.kit.GradleProject
 import com.autonomousapps.kit.Source
 import com.autonomousapps.kit.SourceType
 import com.autonomousapps.kit.android.AndroidManifest
-import com.autonomousapps.kit.gradle.dependencies.Plugins
 import com.autonomousapps.model.ProjectAdvice
 
 import static com.autonomousapps.AdviceHelper.actualProjectAdvice
@@ -29,10 +28,7 @@ final class KmpAndroidProject extends AbstractAndroidProject {
         app.sources = sourcesConsumer
         app.withBuildScript { bs ->
           bs.android = defaultAndroidAppBlock()
-          bs.plugins = [
-            Plugins.androidApp,
-            Plugins.kotlinAndroid
-          ]
+          bs.plugins = androidAppWithKotlin
           bs.dependencies = [
             // The artifact that is actually used is foundation-android
             implementation('androidx.compose.foundation:foundation:1.6.0-alpha06')

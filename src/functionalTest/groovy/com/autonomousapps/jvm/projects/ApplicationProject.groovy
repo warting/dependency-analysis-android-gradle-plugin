@@ -7,6 +7,7 @@ import com.autonomousapps.kit.GradleProject
 import com.autonomousapps.kit.Source
 import com.autonomousapps.kit.SourceType
 import com.autonomousapps.kit.gradle.Plugin
+import com.autonomousapps.kit.gradle.dependencies.Plugins
 import com.autonomousapps.model.Advice
 import com.autonomousapps.model.ProjectAdvice
 
@@ -14,39 +15,54 @@ import static com.autonomousapps.AdviceHelper.*
 import static com.autonomousapps.kit.gradle.dependencies.Dependencies.*
 
 /**
- * This project has the `application` plugin applied. There should be no api dependencies, only
- * implementation.
+ * This project has the `application` plugin applied. There should be no api dependencies, only implementation.
  */
 final class ApplicationProject extends AbstractProject {
 
-  private final List<Plugin> plugins
+  private final List<Plugin> appliedPlugins
   private final SourceType sourceType
+  private final boolean forced
   private final commonsMath = commonsMath('implementation')
 
   final GradleProject gradleProject
 
   ApplicationProject(
-    List<Plugin> plugins = [Plugin.application],
-    SourceType sourceType = SourceType.JAVA
+    List<Plugin> appliedPlugins = [Plugin.application],
+    SourceType sourceType = SourceType.JAVA,
+    boolean forced = false
   ) {
-    this.plugins = plugins
+    this.appliedPlugins = appliedPlugins + Plugins.dependencyAnalysisNoVersion
     this.sourceType = sourceType
+    this.forced = forced
     this.gradleProject = build()
   }
 
   private GradleProject build() {
-    def builder = newGradleProjectBuilder()
-    builder.withSubproject('proj') { s ->
-      s.sources = sources()
-      s.withBuildScript { bs ->
-        bs.plugins = plugins
-        bs.dependencies = dependencies()
-      }
-    }
+    return newGradleProjectBuilder()
+      .withSubproject('proj') { s ->
+        s.sources = sources()
+        s.withBuildScript { bs ->
+          bs.plugins = appliedPlugins
+          bs.dependencies = dependencies()
 
-    def project = builder.build()
-    project.writer().write()
-    return project
+          // TODO(tsr): put this somewhere else. It's only for TestKit-Truth
+          bs.withGroovy(
+            """\
+          processResources {
+            from 'res.txt'
+          }
+          ${forced ? '''
+          dependencyAnalysis {
+            app()
+          }
+          ''' : ''}
+          """
+          )
+        }
+        // TODO(tsr): put this somewhere else. It's only for TestKit-Truth
+        s.withFile('res.txt', 'foo=bar')
+      }
+      .write()
   }
 
   private dependencies() {

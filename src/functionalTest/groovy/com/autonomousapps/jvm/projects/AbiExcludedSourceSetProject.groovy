@@ -5,7 +5,6 @@ package com.autonomousapps.jvm.projects
 import com.autonomousapps.AbstractProject
 import com.autonomousapps.kit.GradleProject
 import com.autonomousapps.kit.Source
-import com.autonomousapps.kit.gradle.dependencies.Plugins
 import com.autonomousapps.model.ProjectAdvice
 
 import static com.autonomousapps.AdviceHelper.actualProjectAdvice
@@ -38,7 +37,7 @@ final class AbiExcludedSourceSetProject extends AbstractProject {
       .withSubproject('consumer') { s ->
         s.sources = sourcesConsumer
         s.withBuildScript { bs ->
-          bs.plugins(Plugins.kotlinNoVersion)
+          bs.plugins(kotlin)
           bs.sourceSets('functionalTest')
           bs.dependencies(project('functionalTestImplementation', ':producer'))
         }
@@ -46,7 +45,7 @@ final class AbiExcludedSourceSetProject extends AbstractProject {
       .withSubproject('producer') { s ->
         s.sources = sourcesProducer
         s.withBuildScript { bs ->
-          bs.plugins(Plugins.kotlinNoVersion)
+          bs.plugins(kotlin)
         }
       }
       .write()
@@ -87,6 +86,6 @@ final class AbiExcludedSourceSetProject extends AbstractProject {
 
   final Set<ProjectAdvice> expectedBuildHealth = [
     emptyProjectAdviceFor(':consumer'),
-    emptyProjectAdviceFor(':producer')
+    emptyProjectAdviceFor(':producer'),
   ]
 }

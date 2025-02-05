@@ -7,7 +7,6 @@ import com.autonomousapps.kit.GradleProject
 import com.autonomousapps.kit.Source
 import com.autonomousapps.kit.SourceType
 import com.autonomousapps.kit.gradle.Dependency
-import com.autonomousapps.kit.gradle.Plugin
 import com.autonomousapps.model.Advice
 import com.autonomousapps.model.ProjectAdvice
 
@@ -24,21 +23,16 @@ final class SecurityProviderProject extends AbstractProject {
   }
 
   private GradleProject build() {
-    def builder = newGradleProjectBuilder()
-    builder.withSubproject('proj') { s ->
-      s.sources = sources
-      s.withBuildScript { bs ->
-        bs.plugins = plugins
-        bs.dependencies = dependencies
+    return newGradleProjectBuilder()
+      .withSubproject('proj') { s ->
+        s.sources = sources
+        s.withBuildScript { bs ->
+          bs.plugins = javaLibrary
+          bs.dependencies = dependencies
+        }
       }
-    }
-
-    def project = builder.build()
-    project.writer().write()
-    return project
+      .write()
   }
-
-  private List<Plugin> plugins = [Plugin.javaLibrary]
 
   private final conscryptUber = conscryptUber("implementation")
 
@@ -68,11 +62,11 @@ final class SecurityProviderProject extends AbstractProject {
     return actualProjectAdvice(gradleProject)
   }
 
-  private final appAdvice = [
+  private final projAdvice = [
     Advice.ofChange(moduleCoordinates(conscryptUber), conscryptUber.configuration, 'runtimeOnly'),
   ] as Set<Advice>
 
   final Set<ProjectAdvice> expectedBuildHealth = [
-    projectAdviceForDependencies(':proj', appAdvice)
+    projectAdviceForDependencies(':proj', projAdvice)
   ]
 }

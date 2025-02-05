@@ -40,7 +40,7 @@ abstract class AbstractVariantProject extends AbstractAndroidProject {
   private GradleProject build() {
     def properties = projectGradleProperties
     if (!DebugAware.debug) {
-      // There is a Gradle bug that makes tests break when the test uses CC and we're also debugging
+      // There is a Gradle bug that makes tests break when the test uses CC/IP and we're also debugging
       properties += GradleProperties.enableConfigurationCache()
     }
 
@@ -54,16 +54,17 @@ abstract class AbstractVariantProject extends AbstractAndroidProject {
         a.styles = AndroidStyleRes.DEFAULT
         a.colors = AndroidColorRes.DEFAULT
         a.withBuildScript { bs ->
-          bs.plugins = plugins
+          bs.plugins = appliedPlugins
           bs.android = defaultAndroidAppBlock()
           bs.dependencies = dependencies
         }
       }.write()
   }
 
-  protected final List<Plugin> plugins = [
+  protected final List<Plugin> appliedPlugins = [
     Plugins.androidApp,
-    Plugins.kotlinAndroid
+    Plugins.kotlinAndroidNoVersion,
+    Plugins.dependencyAnalysisNoVersion,
   ]
 
   protected final List<Dependency> dependencies = [

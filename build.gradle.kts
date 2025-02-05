@@ -2,8 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 @file:Suppress("UnstableApiUsage", "HasPlatformType", "PropertyName")
 
-import org.jetbrains.kotlin.cli.common.toBooleanLenient
-
 plugins {
   id("java-gradle-plugin")
   id("com.gradle.plugin-publish")
@@ -25,7 +23,7 @@ dagp {
   version(version)
   pom {
     name.set("Dependency Analysis Gradle Plugin")
-    description.set("Analyzes dependency usage in Android and Java/Kotlin projects")
+    description.set("Analyzes dependency usage in Android and JVM projects")
     inceptionYear.set("2019")
   }
   publishTaskDescription(
@@ -44,6 +42,15 @@ gradlePlugin {
 
       displayName = "Dependency Analysis Gradle Plugin"
       description = "A plugin to report mis-used dependencies in your JVM or Android project"
+      tags.set(listOf("java", "kotlin", "groovy", "scala", "android", "dependencies"))
+    }
+
+    create("buildHealthPlugin") {
+      id = "com.autonomousapps.build-health"
+      implementationClass = "com.autonomousapps.BuildHealthPlugin"
+
+      displayName = "Build Health Gradle Plugin"
+      description = "A plugin to report on the health of your JVM or Android build"
       tags.set(listOf("java", "kotlin", "groovy", "scala", "android", "dependencies"))
     }
   }
@@ -99,25 +106,21 @@ gradleTestKitSupport {
 
 dependencies {
   implementation(platform(libs.kotlin.bom))
+  implementation(platform(libs.okio.bom))
 
-  api(libs.guava) {
-    because("Graphs")
-  }
   api(libs.javax.inject)
   api(libs.moshi.core)
   api(libs.moshix.sealed.runtime)
 
   implementation(project(":graph-support"))
+  implementation(libs.guava)
   implementation(libs.kotlin.stdlib.jdk8)
+  implementation(libs.kotlin.editor.relocated)
   implementation(libs.moshi.kotlin)
   implementation(libs.moshix.sealed.reflect)
   implementation(libs.okio)
-
-  implementation(libs.kotlinx.metadata.jvm) {
-    because("For Kotlin ABI analysis")
-    // Depends on Kotlin 1.6, which I don't want. We also don't want to set a strict constraint, because
-    // I think that is exposed to consumers, and which would invariably break their projects. In the end,
-    // this is merely aesthetic.
+  implementation(libs.kotlin.metadata.jvm) {
+    // Depends on Kotlin 2.x, which I don't want. This is fragile, though. Will eventually have to update to Kotlin 2.
     isTransitive = false
   }
   implementation(libs.caffeine) {
@@ -171,7 +174,7 @@ fun maxParallelForks() =
 
 val isCi = providers.environmentVariable("CI")
   .getOrElse("false")
-  .toBooleanLenient()!!
+  .toBoolean()
 
 // This will slow down tests on CI, but maybe it won't run out of metaspace.
 fun forkEvery(): Long = if (isCi) 40 else 0
@@ -190,6 +193,7 @@ val functionalTest = tasks.named("functionalTest", Test::class) {
   jvmArgs("-XX:+HeapDumpOnOutOfMemoryError", "-XX:MaxMetaspaceSize=1g")
 
   systemProperty("com.autonomousapps.quick", "${quickTest()}")
+  systemProperty("com.autonomousapps.test.versions.kotlin", libs.versions.kotlin.get())
 
   beforeTest(closureOf<TestDescriptor> {
     logger.lifecycle("Running test: $this")
@@ -317,6 +321,12 @@ dependencyAnalysis {
       includeDependency("org.jetbrains.kotlin:kotlin-gradle-plugin")
       includeDependency("org.jetbrains.kotlin:kotlin-gradle-plugin-api")
     }
+    bundle("truth") {
+      includeDependency(libs.truth)
+      // Truth's Subject class makes use of the @Nullable annotation from this library when creating `Factory`s. It ends
+      // up in the bytecode, but I don't really have any control over that.
+      includeDependency("org.checkerframework:checker-qual")
+    }
   }
 
   abi {
@@ -332,23 +342,6 @@ dependencyAnalysis {
     all {
       onAny {
         severity("fail")
-      }
-      onIncorrectConfiguration {
-        exclude(
-          // TODO(tsr):
-          //  1. version catalog ref (libs.relocated.asm) is not working for some reason
-          //  2. This fatjar is bundling Kotlin stdlib classes, which is what the analysis is detecting
-          "com.autonomousapps:asm-relocated",
-        )
-      }
-      onUsedTransitiveDependencies {
-        exclude(
-          // TODO(tsr):
-          //  1. version catalog ref (libs.relocated.asm) is not working for some reason
-          //  2. This fatjar is bundling Kotlin stdlib classes, which is what the analysis is detecting
-          //  3. The exclusion only works when I use the project reference, not the Maven coordinates
-          ":asm-relocated",
-        )
       }
     }
   }

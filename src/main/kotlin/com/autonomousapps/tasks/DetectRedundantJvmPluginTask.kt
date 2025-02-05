@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package com.autonomousapps.tasks
 
-import com.autonomousapps.TASK_GROUP_DEP_INTERNAL
-import com.autonomousapps.advice.PluginAdvice
+import com.autonomousapps.model.PluginAdvice
 import com.autonomousapps.extension.Behavior
 import com.autonomousapps.extension.Ignore
 import com.autonomousapps.internal.utils.bufferWriteJsonSet
@@ -24,7 +23,6 @@ import org.gradle.api.tasks.TaskAction
 abstract class DetectRedundantJvmPluginTask : DefaultTask() {
 
   init {
-    group = TASK_GROUP_DEP_INTERNAL
     description = "Produces a report about redundant jvm plugins that have been applied"
   }
 

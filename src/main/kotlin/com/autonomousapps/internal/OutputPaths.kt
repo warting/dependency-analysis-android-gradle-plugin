@@ -5,6 +5,9 @@
 package com.autonomousapps.internal
 
 import org.gradle.api.Project
+import org.gradle.api.file.Directory
+import org.gradle.api.file.RegularFile
+import org.gradle.api.provider.Provider
 
 internal const val ROOT_DIR = "reports/dependency-analysis"
 
@@ -13,8 +16,8 @@ internal class OutputPaths(
   variantName: String
 ) {
 
-  private fun file(path: String) = project.layout.buildDirectory.file(path)
-  private fun dir(path: String) = project.layout.buildDirectory.dir(path)
+  private fun file(path: String): Provider<RegularFile> = project.layout.buildDirectory.file(path)
+  private fun dir(path: String): Provider<Directory> = project.layout.buildDirectory.dir(path)
 
   private val variantDirectory = "$ROOT_DIR/$variantName"
   private val intermediatesDir = "${variantDirectory}/intermediates"
@@ -22,7 +25,9 @@ internal class OutputPaths(
   val compileArtifactsPath = file("${intermediatesDir}/artifacts.json")
   val runtimeArtifactsPath = file("${intermediatesDir}/artifacts-runtime.json")
   val externalDependenciesPath = file("${intermediatesDir}/external-dependencies.txt")
-  val allDeclaredDepsPath = file("${intermediatesDir}/exploded-jars.json")
+  val duplicateCompileClasspathPath = file("${intermediatesDir}/duplicate-classes-compile.json")
+  val duplicateCompileRuntimePath = file("${intermediatesDir}/duplicate-classes-runtime.json")
+  val explodedJarsPath = file("${intermediatesDir}/exploded-jars.json")
   val inlineUsagePath = file("${intermediatesDir}/inline-usage.json")
   val typealiasUsagePath = file("${intermediatesDir}/typealias-usage.json")
   val inlineUsageErrorsPath = file("${intermediatesDir}/inline-usage-errors.txt")
@@ -58,18 +63,24 @@ internal class OutputPaths(
   val runtimeDominatorConsolePath = file("${graphDir}/graph-dominator-runtime.txt")
   val compileDominatorGraphPath = file("${graphDir}/graph-dominator.gv")
   val runtimeDominatorGraphPath = file("${graphDir}/graph-dominator-runtime.gv")
+  val compileDominatorJsonPath = file("${graphDir}/graph-dominator.json")
+  val runtimeDominatorJsonPath = file("${graphDir}/graph-dominator-runtime.json")
+
+  val projectGraphDir = dir("$graphDir/project")
 }
 
 /**
  * Differs from [OutputPaths] in that this is for project-aggregator tasks that don't have variants.
  */
+@Suppress("SameParameterValue")
 internal class NoVariantOutputPaths(private val project: Project) {
 
-  @Suppress("SameParameterValue")
-  private fun file(path: String) = project.layout.buildDirectory.file(path)
+  private fun file(path: String): Provider<RegularFile> = project.layout.buildDirectory.file(path)
+  private fun dir(path: String): Provider<Directory> = project.layout.buildDirectory.dir(path)
 
   val locationsPath = file("$ROOT_DIR/declarations.json")
   val resolvedDepsPath = file("$ROOT_DIR/resolved-dependencies-report.txt")
+  val mergedProjectGraphPath = file("$ROOT_DIR/merged-project-graph.json")
 
   /*
    * Advice-related tasks.
@@ -88,18 +99,21 @@ internal class NoVariantOutputPaths(private val project: Project) {
  */
 internal class RootOutputPaths(private val project: Project) {
 
-  private fun file(path: String) = project.layout.buildDirectory.file(path)
+  private fun file(path: String): Provider<RegularFile> = project.layout.buildDirectory.file(path)
+  private fun dir(path: String): Provider<Directory> = project.layout.buildDirectory.dir(path)
 
   val duplicateDependenciesPath = file("$ROOT_DIR/duplicate-dependencies-report.json")
   val buildHealthPath = file("$ROOT_DIR/build-health-report.json")
   val consoleReportPath = file("$ROOT_DIR/build-health-report.txt")
   val shouldFailPath = file("$ROOT_DIR/should-fail.txt")
+
+  val workPlanDir = dir("$ROOT_DIR/work-plan")
 }
 
 internal class RedundantSubPluginOutputPaths(private val project: Project) {
 
   @Suppress("SameParameterValue")
-  private fun file(path: String) = project.layout.buildDirectory.file(path)
+  private fun file(path: String): Provider<RegularFile> = project.layout.buildDirectory.file(path)
 
   /**
    * This path doesn't use variants because the task that uses it only ever has one instance

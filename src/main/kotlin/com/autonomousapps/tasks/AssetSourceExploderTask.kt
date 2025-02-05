@@ -2,11 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 package com.autonomousapps.tasks
 
-import com.autonomousapps.TASK_GROUP_DEP_INTERNAL
 import com.autonomousapps.internal.utils.bufferWriteJsonSet
 import com.autonomousapps.internal.utils.getAndDelete
 import com.autonomousapps.internal.utils.mapToSet
-import com.autonomousapps.model.AndroidAssetSource
+import com.autonomousapps.model.internal.AndroidAssetSource
 import org.gradle.api.DefaultTask
 import org.gradle.api.file.ConfigurableFileCollection
 import org.gradle.api.file.DirectoryProperty
@@ -20,11 +19,10 @@ import javax.inject.Inject
 
 abstract class AssetSourceExploderTask @Inject constructor(
   private val workerExecutor: WorkerExecutor,
-  private val layout: ProjectLayout
+  private val layout: ProjectLayout,
 ) : DefaultTask() {
 
   init {
-    group = TASK_GROUP_DEP_INTERNAL
     description = "Produces a report of all assets in this project"
   }
 

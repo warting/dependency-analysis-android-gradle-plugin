@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 package com.autonomousapps.model
 
+import com.google.common.hash.Hashing
 import com.squareup.moshi.JsonClass
 import dev.zacsweers.moshix.sealed.annotations.TypeLabel
+import java.nio.charset.StandardCharsets
 
 @JsonClass(generateAdapter = false, generator = "sealed:type")
 sealed class Coordinates(
@@ -57,24 +59,35 @@ sealed class Coordinates(
   /** Group-artifact-version (GAV) string representation, as used in Gradle dependency declarations. */
   abstract fun gav(): String
 
-  fun toFileName() = "${gav()}${
-    capabilitiesWithoutDefault().joinToString("") { "__$it" }
-  }.json".replace(":", "__")
+  fun toFileName() = capabilitiesWithoutDefault().let { capabilities ->
+    when {
+      capabilities.isEmpty() -> "${gav().replace(":", "__")}.json"
+      // In case we have capabilities, we use a unique hash for the capability combination in the file name
+      // to not mix dependencies with different capabilities.
+      else -> "${gav().replace(":", "__")}__${fingerprint(capabilities)}.json"
+    }
+  }
+
+  private fun fingerprint(capabilities: List<String>) =
+    Hashing.fingerprint2011().hashString(capabilities.joinToString("_"), StandardCharsets.UTF_8)
 
   private fun capabilitiesWithoutDefault() =
     gradleVariantIdentification.capabilities.filter {
       !it.endsWith(identifier) // If empty, needs to contain the 'default' capability
     }.sorted()
 
+  fun hasDefaultCapability(): Boolean {
+    return gradleVariantIdentification.capabilities.singleOrNull { it == identifier } != null
+  }
+
   /**
    * In case of an 'ADD' advice, the GradleVariantIdentification is directly sourced from the selected node
    * in the dependency graph. It's hard (or impossible with Gradle's current APIs) to find the exact declaration that
-   * let to selecting that node. If we could find that declaration, we could use it for the ADD advice.
-   * Right now, we use the details from the node in the Graph which may contain more capabilities as you need
-   * to declare. In particular, it also contains the 'default capability', which makes it conceptually equal to
-   * Coordinates without capability.
-   * In order to correctly reduce advices (e.g. merge a REMOVE and an ADD to a CHANGE), we need the same Coordinates
-   * on both. So this method should be used to 'minify' the GradleVariantIdentification for ADD advices.
+   * led to selecting that node. If we could find that declaration, we could use it for the ADD advice. Right now, we
+   * use the details from the node in the graph which may contain more capabilities as you need to declare. In
+   * particular, it also contains the 'default capability', which makes it conceptually equal to Coordinates without
+   * capability. In order to correctly reduce advices (e.g. merge a REMOVE and an ADD to a CHANGE), we need the same
+   * Coordinates on both. So this method should be used to 'minify' the GradleVariantIdentification for ADD advices.
    *
    * @return A copy of this Coordinates without the 'default capability'
    */
@@ -119,9 +132,16 @@ sealed class Coordinates(
             resolvedVersion = c[2],
             gradleVariantIdentification = GradleVariantIdentification.EMPTY
           )
-        } else FlatCoordinates(raw)
+        } else {
+          FlatCoordinates(raw)
+        }
       }
     }
+
+    internal fun Coordinates.copy(gradleVariantIdentification: GradleVariantIdentification): Coordinates = copy(
+      identifier = identifier,
+      gradleVariantIdentification = gradleVariantIdentification,
+    )
 
     internal fun Coordinates.copy(
       identifier: String,
@@ -149,6 +169,15 @@ data class ProjectCoordinates(
   init {
     check(identifier.startsWith(':')) { "Project coordinates must start with a ':'" }
   }
+
+  /**
+   * Returns a view of [this][ProjectCoordinates] with only the [identifier]. Used to flatten graphs (ignore variants).
+   */
+  internal fun flatten(): ProjectCoordinates = ProjectCoordinates(
+    identifier = identifier,
+    gradleVariantIdentification = GradleVariantIdentification.EMPTY,
+    buildPath = null,
+  )
 
   override fun gav(): String = identifier
 }
@@ -179,7 +208,10 @@ data class IncludedBuildCoordinates(
   val resolvedProject: ProjectCoordinates,
   override val gradleVariantIdentification: GradleVariantIdentification,
 ) : Coordinates(identifier, gradleVariantIdentification) {
+
   override fun gav(): String = identifier
+
+  internal fun isForBuild(buildPath: String): Boolean = resolvedProject.buildPath == buildPath
 
   companion object {
     fun of(requested: ModuleCoordinates, resolvedProject: ProjectCoordinates) = IncludedBuildCoordinates(

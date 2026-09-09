@@ -324,7 +324,7 @@ public data class KmpSourceKind(
 
           else -> {
             if (isProbablyJvmMain(sourceSetName)) {
-              // desktopMaim => desktopCompileClasspath
+              // desktopMain => desktopCompileClasspath
               "${sourceSetName.substringBefore("Main")}CompileClasspath"
             } else {
               // jvmTest => jvmTestCompileClasspath
@@ -341,7 +341,7 @@ public data class KmpSourceKind(
 
           else -> {
             if (isProbablyJvmMain(sourceSetName)) {
-              // desktopMaim => desktopRuntimeClasspath
+              // desktopMain => desktopRuntimeClasspath
               "${sourceSetName.substringBefore("Main")}RuntimeClasspath"
             } else {
               // jvmTest => jvmTestRuntimeClasspath
